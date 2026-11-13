@@ -3,8 +3,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   DEF_TZ, emptyState, applyOps, checkInitData, webhookSecret, validTz,
-  dueReminders, buildDigest, digestDue, escHtml
+  dueReminders, buildDigest, digestDue, escHtml,
+  ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn
 } from './lib.js';
+
+const ZEN_EVERY = 30 * 60e3; // как часто обновлять Дзен-мани
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
@@ -60,7 +63,7 @@ export class Store extends DurableObject {
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
       await this.putMeta(meta);
-      return { ok: true, me: pub(), members: members(), bot: meta.bot, personal: await this.data('u:' + me.id), family: await this.data('family') };
+      return { ok: true, me: pub(), members: members(), bot: meta.bot, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id), family: await this.data('family') };
     }
     if (action === 'ops') {
       const key = body.scope === 'family' ? 'family' : 'u:' + me.id;
@@ -91,7 +94,63 @@ export class Store extends DurableObject {
       await this.putMeta(meta);
       return { ok: true, link: `https://t.me/${meta.bot}?start=join_${meta.invite.code}` };
     }
+    if (action === 'zenConnect') {
+      const token = String(body.token || '').trim().replace(/^Bearer\s+/i, '');
+      if (token.length < 10 || token.length > 400) return { ok: false, error: 'bad_token' };
+      await this.ctx.storage.put('zen:' + me.id, { token, ts: 0, tags: {}, accounts: {}, instr: {}, lastSync: 0, error: '' });
+      const r = await this.zenSync(me, true);
+      if (!r.ok) await this.ctx.storage.delete('zen:' + me.id);
+      return { ...r, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id) };
+    }
+    if (action === 'zenSync') {
+      const r = await this.zenSync(me, !!body.full);
+      return { ...r, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id) };
+    }
+    if (action === 'zenOff') {
+      await this.ctx.storage.delete('zen:' + me.id);
+      if (body.removeData) {
+        const st = await this.data('u:' + me.id);
+        st.money = (st.money || []).filter(o => o.src !== 'zen');
+        await this.putData('u:' + me.id, st);
+      }
+      return { ok: true, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id) };
+    }
     return { status: 404, error: 'unknown_action' };
+  }
+
+  /* ---------- Дзен-мани ---------- */
+  async zenStatus(uid) {
+    const z = await this.ctx.storage.get('zen:' + uid);
+    return z ? { connected: true, lastSync: z.lastSync || 0, error: z.error || '', count: z.count || 0, accounts: Object.keys(z.accounts || {}).length } : { connected: false };
+  }
+  async zenSync(user, full = false) {
+    const key = 'zen:' + user.id;
+    const z = await this.ctx.storage.get(key);
+    if (!z || !z.token) return { ok: false, error: 'not_connected' };
+    z.lastSync = Date.now();
+    let res, d;
+    try {
+      res = await fetch(ZEN_API, {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + z.token, 'content-type': 'application/json' },
+        body: JSON.stringify({ currentClientTimestamp: Math.floor(Date.now() / 1000), serverTimestamp: full ? 0 : (z.ts || 0) })
+      });
+    } catch (e) { z.error = 'network'; await this.ctx.storage.put(key, z); return { ok: false, error: 'network' }; }
+    if (res.status === 401 || res.status === 403) {
+      const first = z.error !== 'token';
+      z.error = 'token'; await this.ctx.storage.put(key, z);
+      if (first && !full && user.started) await this.send(user.id, '⚠️ Дзен-мани перестал пускать бота: токен устарел. Открой «Финансы» и подключи Дзен-мани заново.');
+      return { ok: false, error: 'token' };
+    }
+    if (!res.ok) { z.error = 'http_' + res.status; await this.ctx.storage.put(key, z); return { ok: false, error: z.error }; }
+    try { d = await res.json(); } catch (e) { z.error = 'bad_json'; await this.ctx.storage.put(key, z); return { ok: false, error: 'bad_json' }; }
+    const since = firstOfPrevMonth(partsIn(user.tz || DEF_TZ).ymd);
+    const r = zenDiffToOps(d, z, since);
+    const st = applyOps(await this.data('u:' + user.id), r.ops);
+    await this.putData('u:' + user.id, st);
+    Object.assign(z, { ts: r.ts, tags: r.tags, accounts: r.accounts, instr: r.instr, error: '', count: st.money.filter(o => o.src === 'zen').length });
+    await this.ctx.storage.put(key, z);
+    return { ok: true, changed: r.ops.length };
   }
 
   /* ---------- Сообщения боту ---------- */
@@ -166,7 +225,7 @@ export class Store extends DurableObject {
     if (!users.length) return { users: 0 };
     const fam = await this.data('family');
     const hasFamily = Object.keys(meta.users).length > 1;
-    let sent = 0;
+    let sent = 0, zenDone = false; // за один тик — не больше одной синхронизации
     for (const u of users) {
       const tz = u.tz || DEF_TZ;
       const pers = await this.data('u:' + u.id);
@@ -177,6 +236,10 @@ export class Store extends DurableObject {
         meta.sent[key] = now;
         const res = await this.send(u.id, r.text);
         if (res && res.ok) sent++;
+      }
+      if (!zenDone) {
+        const z = await this.ctx.storage.get('zen:' + u.id);
+        if (z && z.token && z.error !== 'token' && now - (z.lastSync || 0) > ZEN_EVERY) { zenDone = true; await this.zenSync(u); }
       }
       const day = digestDue(u, tz, now);
       if (day) {

@@ -209,3 +209,40 @@ export function digestDue(user, tz, now) {
   if (user.lastDigest === ymd || cur < at || cur - at > 180) return null;
   return ymd;
 }
+
+/* ---------- Дзен-мани ---------- */
+export const ZEN_API = 'https://api.zenmoney.ru/v8/diff/';
+export const firstOfPrevMonth = (ymd) => {
+  const [y, m] = ymd.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return d.toISOString().slice(0, 10);
+};
+// Ответ /v8/diff/ → операции для раздела «Финансы».
+// Переводы между своими счетами пропускаем, удалённые — убираем.
+export function zenDiffToOps(d, z, since) {
+  const tags = Object.assign({}, z.tags), accounts = Object.assign({}, z.accounts), instr = Object.assign({}, z.instr);
+  for (const t of d.tag || []) if (t && t.id) tags[t.id] = t.title;
+  for (const a of d.account || []) if (a && a.id) accounts[a.id] = a.title;
+  for (const i of d.instrument || []) if (i && i.id != null) instr[i.id] = i.shortTitle;
+  const ops = [];
+  for (const del of d.deletion || []) if (del && del.object === 'transaction') ops.push(['del', 'money', 'zm_' + del.id]);
+  for (const t of d.transaction || []) {
+    if (!t || !t.id) continue;
+    const id = 'zm_' + t.id;
+    if (t.deleted) { ops.push(['del', 'money', id]); continue; }
+    if (!t.date || t.date < since) continue;
+    const inc = Number(t.income) || 0, out = Number(t.outcome) || 0;
+    if (inc > 0 && out > 0) { ops.push(['del', 'money', id]); continue; } // перевод между счетами
+    if (!inc && !out) continue;
+    const type = inc > 0 ? 'in' : 'out';
+    const tagId = Array.isArray(t.tag) && t.tag.length ? t.tag[0] : null;
+    const cat = (tagId && tags[tagId]) || (type === 'in' ? 'Доход' : 'Без категории');
+    const cur = instr[type === 'in' ? t.incomeInstrument : t.outcomeInstrument];
+    const note = [t.payee, t.comment, cur && cur !== 'RUB' ? cur : ''].filter(Boolean).join(' · ').slice(0, 120);
+    ops.push(['put', 'money', {
+      id, type, amount: Math.round((type === 'in' ? inc : out) * 100) / 100, cat, note, date: t.date, src: 'zen',
+      acc: accounts[type === 'in' ? t.incomeAccount : t.outcomeAccount] || ''
+    }]);
+  }
+  return { ops, tags, accounts, instr, ts: Number(d.serverTimestamp) || z.ts || 0 };
+}

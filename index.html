@@ -218,6 +218,13 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .hint{font-size:12.5px;color:var(--mut);margin:-4px 0 12px}
 
 .scopebar{margin:0 0 14px}
+.zic{width:36px;height:36px;border-radius:11px;background:#f6c344;color:#3a2a00;display:grid;place-items:center;font:700 17px/1 Unbounded,sans-serif;flex:none}
+.zen .t{min-width:0}
+.zen .sub{font-size:12.5px}
+.spin svg{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.zen ol{margin:0 0 12px;padding-left:20px}.zen ol li{margin:6px 0}
+.sheet ol{margin:0 0 12px;padding-left:20px;color:var(--tx)}.sheet ol li{margin:6px 0}
+.sheet a{color:var(--blue);font-weight:700}
 .sw{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;border-radius:14px;background:var(--slab2);border:1px solid var(--line);font-weight:600}
 .sw input{width:20px;height:20px;accent-color:var(--blue);margin:0}
 .members{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
@@ -416,7 +423,11 @@ const CATS = {
   out: [['Продукты','🛒'],['Кафе','☕'],['Транспорт','⛽'],['Дом','🏠'],['Связь','📱'],['Здоровье','💊'],['Покупки','🛍️'],['Отдых','🎮'],['Работа','🧰'],['Другое','📦']],
   in:  [['Зарплата','💰'],['Заказы','🧾'],['Подработка','🔧'],['Подарок','🎁'],['Другое','📦']]
 };
-const catIcon = (type, name) => (CATS[type].find(c => c[0] === name) || ['', '📦'])[1];
+const CAT_GUESS = [[/продукт|супермаркет|магазин/i, '🛒'], [/кафе|ресторан|кофе|еда вне|фастфуд|доставка/i, '☕'], [/транспорт|такси|авто|бензин|топливо|парков|машин/i, '⛽'],
+  [/дом|кварт|жкх|коммунал|аренд|ремонт/i, '🏠'], [/связь|телефон|интернет|мобил/i, '📱'], [/здоров|аптек|медиц|врач|спорт/i, '💊'], [/одежд|обув|покупк|техник|маркетплейс/i, '🛍️'],
+  [/отдых|развлеч|кино|игр|подписк|хобби|путешеств/i, '🎮'], [/зарплат|оклад|аванс/i, '💰'], [/дет|ребён|ребен|школ|сад/i, '🧸'], [/подар/i, '🎁'], [/работ|бизнес|материал|инструмент/i, '🧰'],
+  [/перевод|долг|кредит|ипотек/i, '💳'], [/красот|салон|космет/i, '💄'], [/живот|питом|ветерин/i, '🐾'], [/образов|курс|книг/i, '📚']];
+const catIcon = (type, name) => { const c = CATS[type].find(c => c[0] === name); if (c) return c[1]; const g = CAT_GUESS.find(([re]) => re.test(name || '')); return g ? g[1] : '📦'; };
 const EMOJI = ['💧','🏃','📖','🌙','🧘','🥗','💪','🚭','📵','🇬🇧','✍️','🧹','💊','🚶','☀️','🎯'];
 const REMIND = [['', 'Без напоминания'], ['0', 'В момент события'], ['15', 'За 15 минут'], ['30', 'За 30 минут'], ['60', 'За 1 час'], ['180', 'За 3 часа'], ['1440', 'За 1 день']];
 
@@ -647,6 +658,18 @@ V.habits = () => {
   : `<div class="card empty" style="text-align:center;padding:28px 16px">Начни с одной маленькой привычки, которую точно сможешь делать каждый день.<br><br><button data-act="newHabit">Добавить привычку</button></div>`}`;
 };
 
+function zenCard() {
+  if (MODE !== 'server' || SCOPE !== 'personal') return '';
+  const z = SRV.zen || { connected: false };
+  if (!z.connected) return `<section class="card zen"><div class="row"><span class="zic">Z</span><div class="t sp"><div class="ttl">Дзен-мани</div><div class="sub">Расходы и доходы будут подтягиваться сами</div></div><button class="chip on" data-act="zenOpen">Подключить</button></div></section>`;
+  const bad = z.error === 'token';
+  const sub = bad ? '<span style="color:var(--red)">Токен устарел, подключи заново</span>'
+    : z.error ? `<span style="color:var(--amber)">Не удалось обновить${z.error === 'network' ? ': нет связи с Дзен-мани' : ''}</span>`
+    : `${z.count} ${plural(z.count, 'операция', 'операции', 'операций')}, обновлено ${z.lastSync ? ago(z.lastSync) : 'ещё не было'}`;
+  return `<section class="card zen"><div class="row"><span class="zic">Z</span><div class="t sp"><div class="ttl">Дзен-мани</div><div class="sub">${sub}</div></div>
+    ${bad ? '<button class="chip on" data-act="zenOpen">Подключить</button>' : `<button class="iconbtn" data-act="zenSync" id="zenBtn" aria-label="Обновить сейчас"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button>`}
+    <button class="iconbtn" data-act="zenMenu" aria-label="Настройки Дзен-мани"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button></div></section>`;
+}
 V.money = () => {
   const mk = UI.mMonth, [y, m] = mk.split('-').map(Number);
   const ms = monthSum(mk), bal = ms.inc - ms.out;
@@ -666,12 +689,13 @@ V.money = () => {
   ${cats.length ? `<section class="card bars"><h2>Куда ушли деньги</h2>
     ${cats.map(([c, v]) => `<div class="b"><div class="bl"><span>${catIcon('out', c)} ${esc(c)}</span><span>${money(v)}</span></div><div class="bt"><i style="width:${Math.max(3, v / max * 100)}%"></i></div></div>`).join('')}
   </section>` : ''}
+  ${zenCard()}
   <section class="card">
     <h2>Операции</h2>
     ${ops.length ? Object.entries(groups).map(([d, list]) => `<div class="dayhdr">${dayLabel(d)}</div>` + list.map(o => `
       <button class="item op" style="width:100%;text-align:left" data-act="editOp" data-id="${o.id}">
         <span class="ic">${catIcon(o.type, o.cat)}</span>
-        <span class="t"><div class="ttl">${esc(o.cat)}</div>${o.note ? `<div class="sub">${esc(o.note)}</div>` : ''}</span>
+        <span class="t"><div class="ttl">${esc(o.cat)}</div>${o.note || o.src ? `<div class="sub">${esc([o.note, o.src === 'zen' ? 'Дзен-мани' : ''].filter(Boolean).join(' · '))}</div>` : ''}</span>
         <span class="sum ${o.type}">${o.type === 'in' ? '+' : '−'}${money(o.amount)}</span>
       </button>`).join('')).join('')
     : `<div class="empty">В этом месяце записей нет. <button data-act="newOp">Добавить запись</button></div>`}
@@ -727,7 +751,7 @@ const F = {
         <label class="f"><span>Дата</span><input class="inp" type="date" name="date" required value="${o.date || today()}"></label>
         <label class="f"><span>Комментарий</span><input class="inp" name="note" maxlength="120" value="${esc(o.note || '')}" placeholder="Необязательно"></label>
       </div>
-      <button class="btn" style="background:var(--violet);color:#160d3a">Сохранить</button>${delBtn('delOp', o.id)}
+      ${o.src === 'zen' ? '<p class="hint">Запись из Дзен-мани. Если изменить её в Дзен-мани, здесь она обновится сама.</p>' : ''}<button class="btn" style="background:var(--violet);color:#160d3a">Сохранить</button>${delBtn('delOp', o.id)}
     </form>`;
   },
   settings: () => {
@@ -753,7 +777,7 @@ const F = {
     <button class="btn ghost" data-act="wipe">${me && SCOPE === 'family' ? 'Удалить данные семьи' : 'Удалить все данные'}</button>`;
   }
 };
-const catPick = (type, val) => radios('cat', CATS[type].map(([n, e]) => [n, `${e} ${n}`]), val || CATS[type][0][0]);
+const catPick = (type, val) => { const list = CATS[type].map(([n, e]) => [n, `${e} ${n}`]); if (val && !CATS[type].some(c => c[0] === val)) list.unshift([val, `${catIcon(type, val)} ${esc(val)}`]); return radios('cat', list, val || CATS[type][0][0]); };
 
 /* ============ Шторка, тост ============ */
 let backCb = null;
@@ -851,6 +875,39 @@ const A = {
     persist([['replace', SRV.personal]], 'personal');
     closeSheet(); render(); toast('Записи перенесены на сервер');
   },
+  zenOpen: () => openSheet(`<h3>Подключить Дзен-мани</h3>
+    <p class="hint" style="margin-bottom:10px">Нужен токен доступа к твоему Дзен-мани. Проще всего получить его так:</p>
+    <ol><li>Открой <a href="https://zerro.app/token" data-act="ext" data-url="https://zerro.app/token">zerro.app/token</a>. Это открытый веб-клиент для Дзен-мани.</li>
+      <li>Войди через свой аккаунт Дзен-мани.</li><li>Скопируй токен и вставь его ниже.</li></ol>
+    <form data-form="zen">
+      <label class="f"><span>Токен</span><textarea class="inp" name="token" required style="min-height:80px" placeholder="Вставь токен сюда" autocomplete="off"></textarea></label>
+      <p class="hint">Токен хранится только на твоём сервере в Cloudflare. Бот только читает операции за этот и прошлый месяц и ничего не меняет в Дзен-мани. Переводы между своими счетами не попадают в расходы.</p>
+      <button class="btn" id="zenGo">Подключить</button>
+    </form>`),
+  ext: (d) => { try { tg.openLink(d.url); } catch (e) { window.open(d.url, '_blank'); } },
+  zenSync: async () => {
+    const b = $('#zenBtn'); if (b) { b.disabled = true; b.classList.add('spin'); }
+    try {
+      const r = await api('zenSync');
+      SRV.zen = r.zen; if (r.personal) { SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name }); if (SCOPE === 'personal') S = SRV.personal; }
+      render(); toast(r.ok ? (r.changed ? 'Операции обновлены' : 'Новых операций нет') : r.error === 'token' ? 'Токен устарел, подключи Дзен-мани заново' : 'Не удалось обновить. Попробуй позже.');
+    } catch (e) { render(); toast('Нет связи с сервером'); }
+  },
+  zenMenu: () => openSheet(`<h3>Дзен-мани</h3>
+    <p class="hint" style="margin-bottom:12px">Операции обновляются сами примерно раз в 30 минут.</p>
+    <button class="btn sec" data-act="zenFull">Загрузить заново за 2 месяца</button>
+    <button class="btn sec" data-act="zenOpen">Поменять токен</button>
+    <button class="btn ghost" data-act="zenOff">Отключить</button>`),
+  zenFull: async () => { closeSheet(); toast('Загружаю…'); try { const r = await api('zenSync', { full: true }); SRV.zen = r.zen; if (r.personal) { SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name }); if (SCOPE === 'personal') S = SRV.personal; } render(); toast(r.ok ? 'Готово' : 'Не удалось загрузить'); } catch (e) { toast('Нет связи с сервером'); } },
+  zenOff: (d, el) => {
+    if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Отключить и удалить загруженные операции'; el.insertAdjacentHTML('afterend', '<button class="btn sec" data-act="zenOffKeep">Отключить, но оставить операции</button>'); return; }
+    A.zenOffDo(true);
+  },
+  zenOffKeep: () => A.zenOffDo(false),
+  zenOffDo: async (removeData) => {
+    try { const r = await api('zenOff', { removeData }); SRV.zen = r.zen; SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name }); if (SCOPE === 'personal') S = SRV.personal; closeSheet(); render(); toast('Дзен-мани отключён'); }
+    catch (e) { toast('Нет связи с сервером'); }
+  },
   skipMigrate: () => { try { localStorage.setItem('myday_nomigrate', '1'); } catch (e) {} closeSheet(); }
 };
 
@@ -897,6 +954,19 @@ const FORMS = {
       catch (e) { toast('Время сводки не сохранилось: нет связи'); }
     }
     closeSheet(); render(); toast('Настройки сохранены');
+  },
+  zen: async (fd) => {
+    const b = $('#zenGo'); b.disabled = true; b.textContent = 'Подключаю…';
+    try {
+      const r = await api('zenConnect', { token: fd.get('token') });
+      if (r.ok) {
+        SRV.zen = r.zen; SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name }); if (SCOPE === 'personal') S = SRV.personal;
+        closeSheet(); render(); hap('ok'); toast(`Дзен-мани подключён: ${r.zen.count} ${plural(r.zen.count, 'операция', 'операции', 'операций')}`);
+        return;
+      }
+      toast(r.error === 'token' || r.error === 'bad_token' ? 'Дзен-мани не принял токен. Проверь, что скопировал его целиком.' : r.error === 'network' ? 'Сервер не смог связаться с Дзен-мани. Попробуй позже.' : 'Не получилось подключить (' + r.error + ')');
+    } catch (e) { toast('Нет связи с сервером'); }
+    b.disabled = false; b.textContent = 'Подключить';
   },
   import: (fd) => {
     try {
