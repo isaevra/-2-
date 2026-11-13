@@ -301,6 +301,7 @@ export function parseIcs(text) {
   const evs = []; let cur = null, alarm = 0;
   for (const raw of lines) {
     const line = raw.trimEnd(); if (!line) continue;
+    if (!cur && /^X-WR-CALNAME[:;]/i.test(line)) { evs.calName = icsText(icsLine(line).value); continue; }
     if (line === 'BEGIN:VEVENT') { cur = { exdates: [] }; continue; }
     if (line === 'END:VEVENT') { if (cur && cur.start) evs.push(cur); cur = null; continue; }
     if (!cur) continue;

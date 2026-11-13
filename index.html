@@ -513,7 +513,7 @@ const taskRow = (t, showDate) => `
     </button>
     ${t.prio ? `<span class="prio p${t.prio}" title="${t.prio === 2 ? 'Срочно' : 'Важно'}"></span>` : ''}
   </div>`;
-const evSub = (e) => [e.end ? 'до ' + e.end : '', e.note, e.src === 'cal' ? (SCOPE === 'family' && e.by ? e.by + ', календарь' : 'Календарь iPhone') : (SCOPE === 'family' && e.by && showWho() ? e.by : '')].filter(Boolean).join(' · ');
+const evSub = (e) => [e.end ? 'до ' + e.end : '', e.note, e.src === 'cal' ? (SCOPE === 'family' && e.by ? e.by + ', ' + (e.calName || 'календарь') : (e.calName || 'Календарь iPhone')) : (SCOPE === 'family' && e.by && showWho() ? e.by : '')].filter(Boolean).join(' · ');
 const eventRow = (e) => `
   <div class="item">
     <span class="time">${e.time || 'весь день'}</span>
@@ -684,21 +684,22 @@ V.plan = () => {
 function calCard() {
   if (MODE !== 'server' || SCOPE !== 'personal') return '';
   const c = SRV.cal || { connected: false };
+  const n = (c.sources || []).length;
   const sub = !c.connected ? 'События с iPhone появятся здесь, бот будет о них напоминать'
-    : c.error ? `<span style="color:var(--amber)">Не удалось обновить${c.error === 'not_ics' || c.error.startsWith('http_4') ? ': проверь ссылку' : ''}</span>`
-    : `${c.count} ${plural(c.count, 'событие', 'события', 'событий')} на 2 месяца, обновлено ${c.lastSync ? ago(c.lastSync) : '—'}`;
+    : `${n} ${plural(n, 'календарь', 'календаря', 'календарей')}, ${c.count} ${plural(c.count, 'событие', 'события', 'событий')}${c.error ? ' · <span style="color:var(--amber)">есть ошибка</span>' : ', обновлено ' + (c.lastSync ? ago(c.lastSync) : '—')}`;
   return `<section class="card zen"><div class="row"><span class="zic" style="background:#ff5a52;color:#fff;font-size:15px">${new Date().getDate()}</span>
-    <div class="t sp"><div class="ttl">Календарь iPhone</div><div class="sub">${sub}</div></div>
+    <div class="t sp"><div class="ttl">Календари iPhone</div><div class="sub">${sub}</div></div>
     ${c.connected ? `<button class="iconbtn" data-act="calSync" id="calBtn" aria-label="Обновить календарь"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button>` : ''}
     <button class="${c.connected ? 'iconbtn' : 'chip on'}" data-act="calOpen" aria-label="Настройки календаря">${c.connected ? '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>' : 'Подключить'}</button></div></section>`;
 }
+const calRemindLabel = (v) => v === '' ? 'без напоминаний' : v === '0' ? 'напоминание в момент события' : 'напоминание ' + (REMIND.find(([k]) => k === v) || ['', ''])[1].toLowerCase();
 const calAfter = (r) => {
   if (r.cal) SRV.cal = r.cal;
   if (r.personal) SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name });
   if (r.family) SRV.family = Object.assign(emptyS(), r.family);
   S = SRV[SCOPE];
 };
-const CAL_ERR = { bad_url: 'Это не похоже на ссылку календаря. Она начинается с webcal:// или https://', not_ics: 'По ссылке нет календаря. Проверь, что включён «Публичный календарь», и скопируй ссылку заново', network: 'Сервер не смог открыть ссылку. Попробуй позже' };
+const CAL_ERR = { dup: 'Этот календарь уже подключён', too_many: 'Можно подключить до 15 календарей', bad_url: 'Это не похоже на ссылку календаря. Она начинается с webcal:// или https://', not_ics: 'По ссылке нет календаря. Проверь, что включён «Публичный календарь», и скопируй ссылку заново', network: 'Сервер не смог открыть ссылку. Попробуй позже' };
 
 V.thoughts = () => {
   const tags = {};
@@ -861,7 +862,7 @@ const F = {
       <div style="height:1px;background:var(--line);margin:18px 0"></div>
       <div class="f"><span>Семья</span><div class="members">${SRV.members.map(m => `<span class="chip">${esc(m.name)}${m.id === me.id ? ' (ты)' : ''}</span>`).join('')}</div></div>
       ${me.isOwner ? '<button class="btn sec" data-act="invite">Пригласить в семью</button>' : ''}
-      <button class="btn sec" data-act="calOpen">Календарь iPhone${SRV.cal && SRV.cal.connected ? ' · подключён' : ''}</button>` : ''}
+      <button class="btn sec" data-act="calOpen">Календари iPhone${SRV.cal && SRV.cal.connected ? ' · ' + SRV.cal.sources.length : ''}</button>` : ''}
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
     <p class="hint" style="margin:0 0 10px">${me ? 'Данные хранятся на твоём сервере в Cloudflare и видны на всех устройствах.' : cloudOK() ? 'Данные хранятся в облаке Telegram и видны на всех твоих устройствах.' : 'Сейчас данные хранятся только в этом браузере. Внутри Telegram они будут сохраняться в облако Telegram.'}</p>
     <button class="btn sec" data-act="exportData">Скопировать резервную копию${me ? ' раздела' : ''}</button>
@@ -918,8 +919,8 @@ const A = {
     openSheet(`<h3>${esc(e.title)}</h3>
       <p style="margin:0 0 6px;font-weight:700">${dayLabel(e.date)}${e.time ? ', ' + e.time + (e.end ? '–' + e.end : '') : ', весь день'}</p>
       ${e.note ? `<p class="mut" style="margin:0 0 6px">${esc(e.note)}</p>` : ''}
-      <p class="hint" style="margin:10px 0 14px">Событие из календаря iPhone${e.by && SCOPE === 'family' ? ' (' + esc(e.by) + ')' : ''}. Изменить или удалить его можно в приложении «Календарь», здесь оно обновится само.</p>
-      ${e.calOwner ? '' : '<button class="btn sec" data-act="calOpen">Настройки календаря</button>'}`);
+      <p class="hint" style="margin:10px 0 14px">Событие из календаря iPhone «${esc(e.calName || 'Календарь')}»${e.by && SCOPE === 'family' ? ', ' + esc(e.by) : ''}. Изменить или удалить его можно в приложении «Календарь», здесь оно обновится само.</p>
+      ${e.calOwner ? '' : `<button class="btn sec" data-act="calEdit" data-id="${esc(e.calSrc || '')}">Настройки календаря</button>`}`);
   },
   delEvent: (d) => removeWithUndo('events', d.id, 'Событие удалено'),
   newHabit: () => openSheet(F.habit()),
@@ -1010,34 +1011,43 @@ const A = {
     catch (e) { toast('Нет связи с сервером'); }
   },
   calOpen: () => {
-    const c = SRV.cal || { connected: false };
-    if (!c.connected) return openSheet(`<h3>Календарь iPhone</h3>
-      <p class="hint" style="margin-bottom:10px">Как получить ссылку на iPhone:</p>
-      <ol><li>Открой «Календарь», внизу нажми «Календари».</li><li>Нажми ⓘ рядом с нужным календарём iCloud.</li>
+    const c = SRV.cal || { connected: false, sources: [] };
+    if (!c.connected) return A.calAdd();
+    openSheet(`<h3>Календари iPhone</h3>
+      <p class="hint" style="margin-bottom:10px">Нажми на календарь, чтобы выбрать, за сколько напоминать и видит ли его семья. Обновляются сами каждые 20 минут.</p>
+      ${c.sources.map(x => `<button class="item" style="width:100%;text-align:left" data-act="calEdit" data-id="${esc(x.id)}">
+        <span class="t"><div class="ttl">${esc(x.name)}</div><div class="sub">${x.error ? `<span style="color:var(--amber)">${esc(CAL_ERR[x.error] || 'Не удалось обновить')}</span>` : `${x.count} ${plural(x.count, 'событие', 'события', 'событий')}, ${calRemindLabel(x.remind)}${x.share ? ', видит семья' : ''}`}</div></span>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" style="color:var(--mut)"><path d="m9 18 6-6-6-6"/></svg></button>`).join('')}
+      <button class="btn" data-act="calAdd" style="margin-top:12px">Добавить календарь</button>`);
+  },
+  calAdd: () => openSheet(`<h3>Добавить календарь</h3>
+      <p class="hint" style="margin-bottom:10px">Ссылку нужно взять для каждого календаря отдельно:</p>
+      <ol><li>Открой «Календарь», внизу нажми «Календари».</li><li>Нажми ⓘ рядом с нужным календарём.</li>
         <li>Включи «Публичный календарь» и нажми «Поделиться ссылкой» → «Скопировать».</li><li>Вставь ссылку ниже.</li></ol>
       <form data-form="cal"><label class="f"><span>Ссылка на календарь</span><input class="inp" name="url" required placeholder="webcal://p…-caldav.icloud.com/published/…" autocomplete="off"></label>
-      <p class="hint">Ссылку нельзя угадать, но любой, у кого она окажется, увидит события. Не пересылай её. Бот только читает календарь и ничего в нём не меняет.</p>
-      <button class="btn" id="calGo">Подключить</button></form>`);
-    openSheet(`<h3>Календарь iPhone</h3>
-      <p class="hint" style="margin-bottom:12px">${c.count} ${plural(c.count, 'событие', 'события', 'событий')} на ближайшие 2 месяца. Обновляется само каждые 20 минут.</p>
-      <form data-form="calSet">
-        <label class="f"><span>Напоминать о событиях календаря</span><select class="inp" name="remind">${REMIND.map(([v, l]) => `<option value="${v}" ${c.remind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <label class="sw" style="margin-bottom:6px"><input type="checkbox" name="share" ${c.share ? 'checked' : ''}>Показывать мои события в «Семье»</label>
-        <p class="hint">Семья увидит твои события в разделе «Семья», но напоминания о них будут приходить только тебе.</p>
+      <p class="hint">Ссылку нельзя угадать, но любой, у кого она окажется, увидит события этого календаря. Не пересылай её. Бот только читает календарь и ничего в нём не меняет.</p>
+      <button class="btn" id="calGo">Подключить</button></form>`),
+  calEdit: (d) => {
+    const x = ((SRV.cal && SRV.cal.sources) || []).find(i => i.id === d.id) || (SRV.cal && SRV.cal.sources && SRV.cal.sources.length === 1 ? SRV.cal.sources[0] : null);
+    if (!x) return A.calOpen();
+    openSheet(`<h3>${esc(x.name)}</h3>
+      <form data-form="calSet"><input type="hidden" name="id" value="${esc(x.id)}">
+        <label class="f"><span>Название</span><input class="inp" name="name" maxlength="40" value="${esc(x.name)}"></label>
+        <label class="f"><span>Напоминать о событиях</span><select class="inp" name="remind">${REMIND.map(([v, l]) => `<option value="${v}" ${x.remind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="sw" style="margin-bottom:6px"><input type="checkbox" name="share" ${x.share ? 'checked' : ''}>Показывать в «Семье»</label>
+        <p class="hint">Если включено, семья увидит события этого календаря в разделе «Семья». Напоминания о них всё равно приходят только тебе.</p>
         <button class="btn">Сохранить</button>
       </form>
-      <button class="btn sec" data-act="calNewUrl">Поменять ссылку</button>
-      <button class="btn ghost" data-act="calOff">Отключить календарь</button>`);
+      <button class="btn ghost" data-act="calRemove" data-id="${esc(x.id)}">Отключить этот календарь</button>`);
   },
-  calNewUrl: () => { SRV.cal = Object.assign({}, SRV.cal, { connected: false }); A.calOpen(); SRV.cal.connected = true; },
   calSync: async () => {
     const b = $('#calBtn'); if (b) { b.disabled = true; b.classList.add('spin'); }
     try { const r = await api('calSync'); calAfter(r); render(); toast(r.ok ? 'Календарь обновлён' : (CAL_ERR[r.error] || 'Не удалось обновить календарь')); }
     catch (e) { render(); toast('Нет связи с сервером'); }
   },
-  calOff: async (d, el) => {
-    if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Нажми ещё раз: события календаря исчезнут из бота'; return; }
-    try { const r = await api('calOff'); calAfter(r); closeSheet(); render(); toast('Календарь отключён'); } catch (e) { toast('Нет связи с сервером'); }
+  calRemove: async (d, el) => {
+    if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Нажми ещё раз: его события исчезнут из бота'; return; }
+    try { const r = await api('calRemove', { id: d.id }); calAfter(r); render(); A.calOpen(); if (!SRV.cal.connected) closeSheet(); toast('Календарь отключён'); } catch (e) { toast('Нет связи с сервером'); }
   },
   shopToggle: (d) => {
     const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
@@ -1117,14 +1127,15 @@ const FORMS = {
   cal: async (fd) => {
     const b = $('#calGo'); b.disabled = true; b.textContent = 'Подключаю…';
     try {
-      const r = await api('calConnect', { url: fd.get('url') });
-      if (r.ok) { calAfter(r); closeSheet(); render(); hap('ok'); toast(`Календарь подключён: ${r.count} ${plural(r.count, 'событие', 'события', 'событий')}`); return; }
+      const r = await api('calAdd', { url: fd.get('url') });
+      if (r.cal) calAfter(r);
+      if (r.added !== undefined) { render(); A.calOpen(); hap('ok'); toast(`Подключён «${r.added || 'Календарь'}»: ${r.addedCount} ${plural(r.addedCount, 'событие', 'события', 'событий')}`); return; }
       toast(CAL_ERR[r.error] || 'Не получилось подключить (' + r.error + ')');
     } catch (e) { toast('Нет связи с сервером'); }
     b.disabled = false; b.textContent = 'Подключить';
   },
   calSet: async (fd) => {
-    try { const r = await api('calSettings', { remind: fd.get('remind'), share: fd.get('share') === 'on' }); calAfter(r); closeSheet(); render(); toast('Сохранено'); }
+    try { const r = await api('calSettings', { id: fd.get('id'), name: fd.get('name') || '', remind: fd.get('remind'), share: fd.get('share') === 'on' }); calAfter(r); render(); A.calOpen(); toast('Сохранено'); }
     catch (e) { toast('Нет связи с сервером'); }
   },
   shop: (fd, f) => {

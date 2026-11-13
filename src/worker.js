@@ -127,72 +127,108 @@ export class Store extends DurableObject {
       }
       return { ok: true, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id) };
     }
-    if (action === 'calConnect') {
-      let url = String(body.url || '').trim().replace(/^webcal:\/\//i, 'https://');
+    if (action === 'calAdd' || action === 'calConnect') {
+      const url = String(body.url || '').trim().replace(/^webcal:\/\//i, 'https://');
       if (!/^https:\/\/[^\s]+$/i.test(url) || url.length > 1000) return { ok: false, error: 'bad_url' };
-      const prev = (await this.ctx.storage.get('cal:' + me.id)) || {};
-      await this.ctx.storage.put('cal:' + me.id, { url, remind: prev.remind ?? '30', share: prev.share ?? true, lastSync: 0, error: '' });
+      const c = await this.calGet(me.id);
+      if (c.sources.some(x => x.url === url)) return { ok: false, error: 'dup', ...(await this.calPayload(me.id)) };
+      if (c.sources.length >= 15) return { ok: false, error: 'too_many' };
+      const src = { id: randCode().slice(0, 8), url, name: '', remind: '30', share: false, error: '', count: 0 };
+      const test = await this.calFetch(src, me);
+      if (!test.ok) return { ok: false, error: test.error };
+      c.sources.push(src);
+      await this.ctx.storage.put('cal:' + me.id, c);
       const r = await this.calSync(me);
-      if (!r.ok) await this.ctx.storage.delete('cal:' + me.id);
-      return { ...r, ...(await this.calPayload(me.id)) };
+      return { ...r, added: src.name, addedCount: src.count, ...(await this.calPayload(me.id)) };
     }
     if (action === 'calSync') return { ...(await this.calSync(me)), ...(await this.calPayload(me.id)) };
     if (action === 'calSettings') {
-      const c = await this.ctx.storage.get('cal:' + me.id);
-      if (!c) return { ok: false, error: 'not_connected' };
-      if (CAL_REMIND.includes(String(body.remind))) c.remind = String(body.remind);
-      if (typeof body.share === 'boolean') c.share = body.share;
+      const c = await this.calGet(me.id), src = c.sources.find(x => x.id === body.id);
+      if (!src) return { ok: false, error: 'not_found' };
+      if (CAL_REMIND.includes(String(body.remind))) src.remind = String(body.remind);
+      if (typeof body.share === 'boolean') src.share = body.share;
+      if (typeof body.name === 'string' && body.name.trim()) src.name = body.name.trim().slice(0, 40);
       await this.ctx.storage.put('cal:' + me.id, c);
       return { ...(await this.calSync(me)), ...(await this.calPayload(me.id)) };
     }
-    if (action === 'calOff') {
-      await this.ctx.storage.delete('cal:' + me.id);
-      await this.calApply(me, [], null);
+    if (action === 'calRemove' || action === 'calOff') {
+      const c = await this.calGet(me.id);
+      c.sources = action === 'calOff' ? [] : c.sources.filter(x => x.id !== body.id);
+      await this.ctx.storage.put('cal:' + me.id, c);
+      await this.calSync(me);
       return { ok: true, ...(await this.calPayload(me.id)) };
     }
     return { status: 404, error: 'unknown_action' };
   }
 
-  /* ---------- Календарь по ссылке ---------- */
+  /* ---------- Календари по ссылкам ---------- */
+  async calGet(uid) {
+    const c = (await this.ctx.storage.get('cal:' + uid)) || { sources: [] };
+    if (!c.sources) { // старый формат: одна ссылка
+      c.sources = c.url ? [{ id: 'main', url: c.url, name: '', remind: c.remind ?? '30', share: c.share !== false, error: c.error || '', count: c.count || 0 }] : [];
+      delete c.url; delete c.remind; delete c.share; delete c.count; delete c.error;
+    }
+    return c;
+  }
   async calStatus(uid) {
-    const c = await this.ctx.storage.get('cal:' + uid);
-    return c ? { connected: true, lastSync: c.lastSync || 0, error: c.error || '', count: c.count || 0, remind: c.remind ?? '30', share: c.share !== false } : { connected: false };
+    const c = await this.calGet(uid);
+    const sources = c.sources.map(x => ({ id: x.id, name: x.name || 'Календарь', count: x.count || 0, error: x.error || '', remind: x.remind ?? '30', share: x.share !== false }));
+    return { connected: sources.length > 0, lastSync: c.lastSync || 0, count: sources.reduce((a, x) => a + x.count, 0), error: sources.some(x => x.error) ? 'some' : '', sources };
   }
   async calPayload(uid) {
     return { cal: await this.calStatus(uid), personal: await this.data('u:' + uid), family: await this.data('family') };
   }
-  // Заменяет события календаря этого человека в его разделе и (если включено) в «Семье»
-  async calApply(user, occ, c) {
-    const id = (k) => 'cal_' + shortHash(user.id + '|' + k);
-    const pers = await this.data('u:' + user.id);
-    pers.events = (pers.events || []).filter(e => e.src !== 'cal').concat(occ.map(o => ({
-      id: id(o.key), title: o.title, date: o.date, time: o.time, end: o.end, note: o.location,
-      remind: o.time ? (c ? c.remind ?? '30' : '') : (c && c.remind === '1440' ? '1440' : ''), src: 'cal'
-    })));
-    await this.putData('u:' + user.id, pers);
-    const fam = await this.data('family');
-    fam.events = (fam.events || []).filter(e => !(e.src === 'cal' && e.calOwner === user.id)).concat(c && c.share !== false ? occ.map(o => ({
-      id: 'f' + id(o.key), title: o.title, date: o.date, time: o.time, end: o.end, note: o.location, remind: '', src: 'cal', calOwner: user.id, by: user.name
-    })) : []);
-    await this.putData('family', fam);
+  // Скачать и разобрать один календарь
+  async calFetch(src, user) {
+    let res;
+    try { res = await fetch(src.url, { headers: { 'user-agent': 'MyDayBot/1.0', accept: 'text/calendar,*/*' } }); } catch (e) { return { ok: false, error: 'network' }; }
+    if (!res.ok) return { ok: false, error: 'http_' + res.status };
+    const text = await res.text();
+    if (!text.includes('BEGIN:VCALENDAR')) return { ok: false, error: 'not_ics' };
+    const evs = parseIcs(text);
+    if (!src.name && evs.calName) src.name = evs.calName.slice(0, 40);
+    const tz = user.tz || DEF_TZ, today = partsIn(tz).ymd;
+    const occ = expandIcs(evs, { from: shiftYmd(today, -3), to: shiftYmd(today, 60), tz });
+    src.count = occ.length;
+    return { ok: true, occ };
   }
   async calSync(user) {
     const key = 'cal:' + user.id;
-    const c = await this.ctx.storage.get(key);
-    if (!c || !c.url) return { ok: false, error: 'not_connected' };
+    const c = await this.calGet(user.id);
     c.lastSync = Date.now();
-    const fail = async (error) => { c.error = error; await this.ctx.storage.put(key, c); return { ok: false, error }; };
-    let res;
-    try { res = await fetch(c.url, { headers: { 'user-agent': 'MyDayBot/1.0', accept: 'text/calendar,*/*' } }); } catch (e) { return fail('network'); }
-    if (!res.ok) return fail('http_' + res.status);
-    const text = await res.text();
-    if (!text.includes('BEGIN:VCALENDAR')) return fail('not_ics');
-    const tz = user.tz || DEF_TZ, today = partsIn(tz).ymd;
-    const occ = expandIcs(parseIcs(text), { from: shiftYmd(today, -3), to: shiftYmd(today, 60), tz });
-    await this.calApply(user, occ, c);
-    Object.assign(c, { error: '', count: occ.length });
+    const results = [];
+    for (const src of c.sources) {
+      const r = await this.calFetch(src, user);
+      src.error = r.ok ? '' : r.error;
+      results.push({ src, ...r });
+    }
+    await this.calApply(user, results, new Set(c.sources.map(x => x.id)));
     await this.ctx.storage.put(key, c);
-    return { ok: true, count: occ.length };
+    const bad = results.filter(r => !r.ok);
+    return { ok: !bad.length, error: bad.length ? bad[0].error : undefined, count: results.reduce((a, r) => a + (r.occ ? r.occ.length : 0), 0) };
+  }
+  // Заменяет события календарей человека в его разделе и в «Семье».
+  // Если календарь временно не скачался, его прежние события остаются.
+  async calApply(user, results, alive) {
+    const keep = new Set(results.filter(r => !r.ok).map(r => r.src.id));
+    const own = (e) => e.src === 'cal' && (!e.calSrc ? true : !keep.has(e.calSrc) || !alive.has(e.calSrc));
+    const id = (k) => 'cal_' + shortHash(user.id + '|' + k);
+    const fresh = [], famFresh = [];
+    for (const r of results) {
+      if (!r.ok) continue;
+      const s = r.src, nm = s.name || 'Календарь';
+      for (const o of r.occ) {
+        const base = { title: o.title, date: o.date, time: o.time, end: o.end, note: o.location, src: 'cal', calSrc: s.id, calName: nm };
+        fresh.push({ ...base, id: id(s.id + '|' + o.key), remind: o.time ? (s.remind ?? '30') : (s.remind === '1440' ? '1440' : '') });
+        if (s.share !== false) famFresh.push({ ...base, id: 'f' + id(s.id + '|' + o.key), remind: '', calOwner: user.id, by: user.name });
+      }
+    }
+    const pers = await this.data('u:' + user.id);
+    pers.events = (pers.events || []).filter(e => !own(e)).concat(fresh);
+    await this.putData('u:' + user.id, pers);
+    const fam = await this.data('family');
+    fam.events = (fam.events || []).filter(e => !(e.calOwner === user.id && own(e))).concat(famFresh);
+    await this.putData('family', fam);
   }
 
   /* ---------- Дзен-мани ---------- */
@@ -332,7 +368,7 @@ export class Store extends DurableObject {
       }
       if (!calDone) {
         const c = await this.ctx.storage.get('cal:' + u.id);
-        if (c && c.url && now - (c.lastSync || 0) > CAL_EVERY) { calDone = true; await this.calSync(u); }
+        if (c && (c.url || (c.sources && c.sources.length)) && now - (c.lastSync || 0) > CAL_EVERY) { calDone = true; await this.calSync(u); }
       }
       if (!zenDone) {
         const z = await this.ctx.storage.get('zen:' + u.id);
