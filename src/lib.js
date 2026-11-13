@@ -1,9 +1,9 @@
 // Чистые функции без зависимостей от Cloudflare — их удобно тестировать.
 
 export const DEF_TZ = 'Asia/Vladivostok';
-export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events'];
+export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop'];
 
-export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [] });
+export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [] });
 
 /* ---------- Проверка подписи Telegram Mini App (initData) ---------- */
 const enc = new TextEncoder();
@@ -194,6 +194,9 @@ export function buildDigest({ name, pers, fam, tz, now, hasFamily }) {
     L.push('', `💰 <b>${MON[Number(mk.slice(5)) - 1]}</b>: доходы +${money(inc, cur)}, расходы −${money(out, cur)}`, `Остаток: ${inc - out < 0 ? '−' : ''}${money(Math.abs(inc - out), cur)}`);
   }
 
+  const shop = ((fam && fam.shop) || []).filter(x => !x.done);
+  if (shop.length) L.push('', `🛒 <b>Купить</b>: ${shop.slice(0, 8).map(x => escHtml(x.text)).join(', ')}${shop.length > 8 ? ` и ещё ${shop.length - 8}` : ''}`);
+
   const pinned = (pers.thoughts || []).filter(t => t.pin);
   if (pinned.length) {
     const t = pinned[Number(ymd.replace(/-/g, '')) % pinned.length];
@@ -250,3 +253,21 @@ export function zenDiffToOps(d, z, since) {
   }
   return { ops, tags, accounts, instr, diag, ts: Number(d.serverTimestamp) || z.ts || 0 };
 }
+
+/* ---------- Список покупок ---------- */
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+export const splitShop = (text) => String(text || '').split(/[,;\n]+/).map(x => x.trim().replace(/\s+/g, ' ').replace(/[.!]+$/, '')).filter(Boolean).map(x => capFirst(x.slice(0, 80))).slice(0, 30);
+// Добавить товары: уже купленный такой же — снова «купить», дубликаты пропускаем
+export function shopAddOps(list, texts, by, mkId, now = Date.now()) {
+  const ops = [], added = [], seen = new Set();
+  for (const text of texts) {
+    const k = text.toLowerCase();
+    if (seen.has(k)) continue; seen.add(k);
+    const ex = (list || []).find(x => x.text.toLowerCase() === k);
+    if (ex && !ex.done) continue;
+    const item = ex ? { ...ex, done: false, doneBy: '', hidden: false, ts: now, by } : { id: mkId(), text, done: false, by, ts: now };
+    ops.push(['put', 'shop', item]); added.push(text);
+  }
+  return { ops, added };
+}
+export const SHOP_RE = /^(купить|куплю|купи|покупки|\+)\s*[:\-–—]?\s*([\s\S]+)$/i;

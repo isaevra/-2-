@@ -75,7 +75,7 @@ button{cursor:pointer;border:0;background:none;padding:0}
 
 /* строки дел и событий */
 .item{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
-.card h2+.item,.dayhdr+.item{border-top:0}
+.card h2+.item,.dayhdr+.item,.card>div>.item:first-child{border-top:0}
 .item .t{flex:1;min-width:0}
 .item .t .ttl{font-weight:600;overflow-wrap:anywhere}
 .item .t .sub{font-size:12.5px;color:var(--mut);margin-top:1px}
@@ -218,6 +218,13 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .hint{font-size:12.5px;color:var(--mut);margin:-4px 0 12px}
 
 .scopebar{margin:0 0 14px}
+.quick input{flex:1;min-width:0;height:46px;border-radius:14px;background:var(--slab2);border:1px solid var(--line);padding:0 14px;outline:none}
+.quick input:focus{border-color:rgba(77,141,255,.7)}
+.quick.shopq button{background:var(--blue);color:#fff}
+.chk.round{border-radius:50%}
+.item.shop.done .chk{background:var(--green);border-color:var(--green)}
+.item .x{width:34px;height:34px;border-radius:10px;color:var(--mut);display:grid;place-items:center;flex:none}
+.item .x svg{width:16px;height:16px}
 .zic{width:36px;height:36px;border-radius:11px;background:#f6c344;color:#3a2a00;display:grid;place-items:center;font:700 17px/1 Unbounded,sans-serif;flex:none}
 .zen .t{min-width:0}
 .zen .sub{font-size:12.5px}
@@ -358,8 +365,8 @@ const save = () => { clearTimeout(saveT); saveT = setTimeout(() => Store.write(S
    личные и общий семейный раздел. Иначе — как раньше, локально. */
 let MODE = 'local', SCOPE = 'personal', SRV = null;
 const PERS = () => (MODE === 'server' ? SRV.personal : S);
-const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events'];
-const emptyS = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [] });
+const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop'];
+const emptyS = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [] });
 const isEmptyS = (st) => !st || COLS.every(c => !st[c] || !st[c].length);
 async function api(action, body = {}) {
   const r = await fetch('api/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: tg ? tg.initData : '', ...body }) });
@@ -408,7 +415,8 @@ async function refresh() {
     applyServer(r); render();
   } catch (e) {}
 }
-setInterval(refresh, 30000);
+let refreshN = 0;
+setInterval(() => { refreshN++; if (UI.view === 'shop' || refreshN % 3 === 0) refresh(); }, 10000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 const scopeBar = () => MODE !== 'server' ? '' : `
   <div class="seg scopebar" role="radiogroup" aria-label="Раздел">
@@ -462,6 +470,11 @@ function demo() {
       { id: uid(), title: 'Купить продукты домой', date: d(0), time: '', prio: 0, done: false },
       { id: uid(), title: 'Оплатить интернет', date: d(1), time: '', prio: 1, done: false },
       { id: uid(), title: 'Разобрать фото с телефона', date: '', time: '', prio: 0, done: false }
+    ],
+    shop: [
+      { id: uid(), text: 'Молоко', done: false, by: '', ts: Date.now() - 6e5 },
+      { id: uid(), text: 'Хлеб', done: false, by: '', ts: Date.now() - 5e5 },
+      { id: uid(), text: 'Яйца', done: true, by: '', ts: Date.now() - 4e5, doneTs: Date.now() - 1e5 }
     ],
     events: [
       { id: uid(), title: 'Тренировка', date: d(0), time: '19:00', remind: '60', note: '' },
@@ -569,6 +582,8 @@ V.home = () => {
     ${!ev.length && !tt.length && !overdue.length ? `<div class="empty">Дел на сегодня нет. <button data-act="newTask">Добавить задачу</button></div>` : ''}
   </section>
 
+  ${shopHomeCard()}
+
   <section class="card">
     <h2>Привычки <a href="#habits">Все</a></h2>
     ${S.habits.length ? `<div class="hchips">${S.habits.map(h => `<button class="hchip ${h.done[t] ? 'on' : ''}" data-act="habit" data-id="${h.id}" data-day="${t}" aria-pressed="${!!h.done[t]}"><span style="font-size:18px">${h.emoji}</span>${esc(h.title)}</button>`).join('')}</div>`
@@ -580,6 +595,47 @@ V.home = () => {
     ${quickBox()}
     <div style="margin-top:10px">${lastTh.map(thoughtCard).join('')}</div>
   </section>`;
+};
+
+/* ---------- Покупки ---------- */
+const shopSt = () => (MODE === 'server' ? SRV.family : S);
+const shopScope = () => (MODE === 'server' ? 'family' : SCOPE);
+const myName = () => (MODE === 'server' ? SRV.me.name : PERS().name);
+const showWho = () => MODE === 'server' && SRV.members.length > 1;
+function shopCommit(...ops) { persist(ops.filter(Boolean), shopScope()); render(); }
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const splitShop = (text) => String(text || '').split(/[,;\n]+/).map(x => x.trim().replace(/\s+/g, ' ').replace(/[.!]+$/, '')).filter(Boolean).map(x => capFirst(x.slice(0, 80))).slice(0, 30);
+const shopTodo = () => (shopSt().shop || []).filter(x => !x.done).sort((a, b) => a.ts - b.ts);
+const XI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+const shopRow = (x) => `
+  <div class="item shop ${x.done ? 'done' : ''}">
+    <button class="chk round" data-act="shopToggle" data-id="${x.id}" aria-label="${x.done ? 'Вернуть в список' : 'Отметить купленным'}">${I.check}</button>
+    <button class="t" style="text-align:left" data-act="shopToggle" data-id="${x.id}"><div class="ttl">${esc(x.text)}</div>${showWho() && (x.done ? x.doneBy : x.by) ? `<div class="sub">${x.done ? 'купил(а) ' + esc(x.doneBy) : esc(x.by)}</div>` : ''}</button>
+    <button class="x" data-act="shopDel" data-id="${x.id}" aria-label="Удалить ${esc(x.text)}">${XI}</button>
+  </div>`;
+const shopForm = (ph) => `<form class="quick shopq" data-form="shop"><input name="text" placeholder="${ph}" autocomplete="off" enterkeyhint="done" aria-label="Что купить"><button type="submit" aria-label="Добавить">${I.plus}</button></form>`;
+function shopHomeCard() {
+  const todo = shopTodo();
+  return `<section class="card">
+    <h2>Покупки <span class="mut">${todo.length || ''}</span><a href="#shop">Весь список</a></h2>
+    ${shopForm('Что купить?')}
+    <div style="margin-top:6px">${todo.slice(0, 5).map(shopRow).join('')}</div>
+    ${todo.length > 5 ? `<a href="#shop" class="empty" style="display:block;color:var(--blue);font-weight:700;text-decoration:none">и ещё ${todo.length - 5}</a>` : ''}
+  </section>`;
+}
+V.shop = () => {
+  const all = shopSt().shop || [], todo = shopTodo();
+  const bought = all.filter(x => x.done && !x.hidden).sort((a, b) => (b.doneTs || 0) - (a.doneTs || 0));
+  const seen = new Set(todo.map(x => x.text.toLowerCase()));
+  const again = all.filter(x => x.done && x.hidden).sort((a, b) => (b.doneTs || 0) - (a.doneTs || 0)).filter(x => { const k = x.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12);
+  return `
+  <div class="vhead"><h1>Покупки</h1><span class="sp"></span><span class="mut" style="font-weight:700">${todo.length || ''}</span></div>
+  ${MODE === 'server' ? '<p class="hint" style="margin:-8px 2px 12px">Общий список для всей семьи. Можно и написать боту: «купить молоко, хлеб».</p>' : ''}
+  <section class="card">${shopForm('Молоко, хлеб, яйца')}</section>
+  ${again.length ? `<div class="chips">${again.map(x => `<button class="chip" data-act="shopAgain" data-id="${x.id}">+ ${esc(x.text)}</button>`).join('')}</div>` : ''}
+  <section class="card"><h2>Купить</h2>${todo.length ? todo.map(shopRow).join('') : '<div class="empty">Список пуст. Добавь, что нужно купить.</div>'}</section>
+  ${bought.length ? `<section class="card"><h2>Куплено <span class="mut">${bought.length}</span></h2>${bought.map(shopRow).join('')}
+    <button class="btn sec" data-act="shopClear" style="margin-top:10px">Убрать купленные</button></section>` : ''}`;
 };
 
 V.plan = () => {
@@ -918,6 +974,27 @@ const A = {
     try { const r = await api('zenOff', { removeData }); SRV.zen = r.zen; SRV.personal = Object.assign(emptyS(), r.personal, { name: r.personal.name || SRV.me.name }); if (SCOPE === 'personal') S = SRV.personal; closeSheet(); render(); toast('Дзен-мани отключён'); }
     catch (e) { toast('Нет связи с сервером'); }
   },
+  shopToggle: (d) => {
+    const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
+    x.done = !x.done; x.doneBy = x.done ? myName() : ''; x.doneTs = Date.now(); x.hidden = false;
+    hap(x.done ? 'ok' : 'light'); shopCommit(['put', 'shop', x]);
+  },
+  shopDel: (d) => {
+    const st = shopSt(), i = st.shop.findIndex(x => x.id === d.id); if (i < 0) return;
+    const [item] = st.shop.splice(i, 1); hap('medium'); shopCommit(['del', 'shop', item.id]);
+    toast('Удалено из покупок', () => { st.shop.splice(i, 0, item); persist([['put', 'shop', item]], shopScope()); return null; });
+  },
+  shopAgain: (d) => {
+    const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
+    Object.assign(x, { done: false, hidden: false, doneBy: '', by: myName(), ts: Date.now() }); hap('light'); shopCommit(['put', 'shop', x]);
+  },
+  shopClear: () => {
+    const st = shopSt(), ops = [], old = Date.now() - 90 * 864e5;
+    for (const x of st.shop) if (x.done && !x.hidden) { x.hidden = true; ops.push(['put', 'shop', x]); }
+    for (const x of st.shop.filter(x => x.hidden && (x.doneTs || 0) < old)) ops.push(['del', 'shop', x.id]);
+    st.shop = st.shop.filter(x => !(x.hidden && (x.doneTs || 0) < old));
+    shopCommit(...ops); toast('Купленное убрано. Его можно быстро добавить снова сверху');
+  },
   skipMigrate: () => { try { localStorage.setItem('myday_nomigrate', '1'); } catch (e) {} closeSheet(); }
 };
 
@@ -964,6 +1041,23 @@ const FORMS = {
       catch (e) { toast('Время сводки не сохранилось: нет связи'); }
     }
     closeSheet(); render(); toast('Настройки сохранены');
+  },
+  shop: (fd, f) => {
+    const st = shopSt(), ops = [], seen = new Set(), now = Date.now();
+    for (const text of splitShop(fd.get('text'))) {
+      const k = text.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
+      const ex = st.shop.find(x => x.text.toLowerCase() === k);
+      if (ex && !ex.done) continue;
+      let item;
+      if (ex) item = Object.assign(ex, { done: false, hidden: false, doneBy: '', by: myName(), ts: now });
+      else st.shop.push(item = { id: uid(), text, done: false, by: myName(), ts: now });
+      ops.push(['put', 'shop', item]);
+    }
+    const onHome = UI.view === 'home';
+    f.reset();
+    if (!ops.length) { toast('Это уже есть в списке'); return; }
+    hap('ok'); shopCommit(...ops);
+    const inp = document.querySelector('[data-form=shop] input'); if (inp) inp.focus({ preventScroll: onHome });
   },
   zen: async (fd) => {
     const b = $('#zenGo'); b.disabled = true; b.textContent = 'Подключаю…';
@@ -1014,14 +1108,14 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============ Навигация ============ */
-const VIEWS = ['home', 'plan', 'thoughts', 'habits', 'money'];
+const VIEWS = ['home', 'plan', 'thoughts', 'habits', 'money', 'shop'];
 function go(v) { if (location.hash !== '#' + v) location.hash = v; else render(); }
 function render() {
   const h = location.hash.slice(1);
   const v = VIEWS.includes(h) ? h : 'home';
   const changed = v !== UI.view; UI.view = v;
   const el = $('#view');
-  el.innerHTML = `<div class="${changed ? 'view' : ''}">${scopeBar()}${V[v]()}</div>`;
+  el.innerHTML = `<div class="${changed ? 'view' : ''}">${v === 'shop' ? '' : scopeBar()}${V[v]()}</div>`;
   document.querySelectorAll('.tab').forEach(t => { t.classList.toggle('on', t.dataset.v === v); t.setAttribute('aria-current', t.dataset.v === v ? 'page' : 'false'); });
   if (changed) window.scrollTo(0, 0);
 }
@@ -1053,6 +1147,7 @@ async function boot() {
   }
   const d = await Store.load();
   S = d && d.v ? d : demo();
+  for (const c of COLS) if (!Array.isArray(S[c])) S[c] = [];
   if (!d) save();
   UI.view = '';
   render();

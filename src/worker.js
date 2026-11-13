@@ -4,8 +4,16 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   DEF_TZ, emptyState, applyOps, checkInitData, webhookSecret, validTz,
   dueReminders, buildDigest, digestDue, escHtml,
-  ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn
+  ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE
 } from './lib.js';
+
+const COMMANDS = [
+  { command: 'today', description: 'Сводка на сегодня' },
+  { command: 'shop', description: 'Список покупок' },
+  { command: 'invite', description: 'Пригласить в семью' },
+  { command: 'help', description: 'Что умеет бот' }
+];
+const CMD_VER = 2;
 
 const ZEN_EVERY = 30 * 60e3; // как часто обновлять Дзен-мани
 
@@ -182,8 +190,9 @@ export class Store extends DurableObject {
         `Привет, ${escHtml(me.name)}! Я бот «Мой день».\n\n` +
         `• Каждое утро в ${me.digest} пришлю сводку: события, дела, привычки и деньги.\n` +
         `• Напомню о событиях и делах, у которых стоит время.\n` +
-        `• Напиши мне любой текст, и я сохраню его в «Мысли».\n\n` +
-        `Команды: /today — сводка сейчас${meta.owner === me.id ? ', /invite — пригласить в семью' : ''}.`,
+        `• Напиши «купить молоко, хлеб», и я добавлю это в общий список покупок.\n` +
+        `• Любой другой текст я сохраню в «Мысли».\n\n` +
+        `Команды: /today — сводка сейчас, /shop — список покупок${meta.owner === me.id ? ', /invite — пригласить в семью' : ''}.`,
         { reply_markup: this.openBtn(meta) });
     }
 
@@ -200,8 +209,20 @@ export class Store extends DurableObject {
       if (!r.ok) return this.send(from.id, 'Не получилось создать приглашение, попробуй ещё раз.');
       return this.send(from.id, `Перешли эту ссылку тому, кого хочешь добавить в семью. Она одноразовая и действует 7 дней:\n${r.link}`);
     }
-    if (text === '/help') return this.send(from.id, 'Напиши текст, и я сохраню его в «Мысли». /today — сводка на сегодня.', { reply_markup: this.openBtn(meta) });
-    if (text.startsWith('/')) return this.send(from.id, 'Не знаю такой команды. Есть /today и /help.');
+    if (text === '/shop' || /^список( покупок)?$/i.test(text)) {
+      const list = ((await this.data('family')).shop || []).filter(x => !x.done);
+      return this.send(from.id, list.length ? `🛒 <b>Купить</b> (${list.length}):\n` + list.map(x => '• ' + escHtml(x.text)).join('\n') : '🛒 Список покупок пуст. Напиши «купить молоко, хлеб», и я добавлю.', { reply_markup: this.openBtn(meta, 'Открыть список') });
+    }
+    const sm = text.match(SHOP_RE);
+    if (sm && !text.startsWith('/')) {
+      const fam = await this.data('family');
+      const r = shopAddOps(fam.shop, splitShop(sm[2]), me.name, randCode);
+      if (!r.added.length) return this.send(from.id, 'Это уже есть в списке покупок 👍');
+      await this.putData('family', applyOps(fam, r.ops));
+      return this.send(from.id, `🛒 Добавил в покупки: ${r.added.map(escHtml).join(', ')}`);
+    }
+    if (text === '/help') return this.send(from.id, '«купить молоко, хлеб» — добавлю в список покупок.\nЛюбой другой текст — сохраню в «Мысли».\n/today — сводка на сегодня, /shop — список покупок.', { reply_markup: this.openBtn(meta) });
+    if (text.startsWith('/')) return this.send(from.id, 'Не знаю такой команды. Есть /today, /shop и /help.');
 
     if (text) {
       const key = 'u:' + me.id;
@@ -223,6 +244,7 @@ export class Store extends DurableObject {
   async tick(now = Date.now()) {
     if (!this.env.BOT_TOKEN) return { skipped: 'no_token' };
     const meta = await this.meta();
+    if (meta.cmdv !== CMD_VER && meta.appUrl) { const cm = await tg(this.env, 'setMyCommands', { commands: COMMANDS }); if (cm.ok) meta.cmdv = CMD_VER; }
     const users = Object.values(meta.users).filter(u => u.started);
     if (!users.length) return { users: 0 };
     const fam = await this.data('family');
@@ -267,11 +289,8 @@ export class Store extends DurableObject {
     steps.push(['Вебхук', wh.ok ? 'подключён' : wh.description]);
     const mb = await tg(this.env, 'setChatMenuButton', { menu_button: { type: 'web_app', text: 'Мой день', web_app: { url: meta.appUrl } } });
     steps.push(['Кнопка меню', mb.ok ? 'открывает ' + meta.appUrl : mb.description]);
-    const cm = await tg(this.env, 'setMyCommands', { commands: [
-      { command: 'today', description: 'Сводка на сегодня' },
-      { command: 'invite', description: 'Пригласить в семью' },
-      { command: 'help', description: 'Что умеет бот' }
-    ] });
+    const cm = await tg(this.env, 'setMyCommands', { commands: COMMANDS });
+    if (cm.ok) meta.cmdv = CMD_VER;
     steps.push(['Команды', cm.ok ? 'добавлены' : cm.description]);
     await this.putMeta(meta);
     return { ok: me.ok && wh.ok && mb.ok, steps, bot: meta.bot };
