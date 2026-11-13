@@ -217,6 +217,12 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .btn.sec{background:var(--slab2);color:var(--tx)}
 .hint{font-size:12.5px;color:var(--mut);margin:-4px 0 12px}
 
+.scopebar{margin:0 0 14px}
+.sw{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;border-radius:14px;background:var(--slab2);border:1px solid var(--line);font-weight:600}
+.sw input{width:20px;height:20px;accent-color:var(--blue);margin:0}
+.members{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.locked{text-align:center;padding:60px 20px}
+.locked h1{font:700 22px/1.2 Unbounded,sans-serif;margin:0 0 12px}
 .toast{position:fixed;left:50%;bottom:calc(var(--safe-b) + 86px);transform:translate(-50%,20px);opacity:0;z-index:60;
   background:#e9eef8;color:#0d1320;border-radius:14px;padding:10px 10px 10px 14px;font-weight:700;display:flex;align-items:center;gap:12px;transition:.2s;pointer-events:none;max-width:92vw}
 .toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
@@ -275,7 +281,7 @@ const MON_S = ['янв','фев','мар','апр','мая','июн','июл','�
 const WD = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
 const WD_S = ['вс','пн','вт','ср','чт','пт','сб'];
 const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return (m10 === 1 && m100 !== 11) ? a : (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) ? b : c; };
-const money = (n) => Math.round(n).toLocaleString('ru-RU').replace(/ /g, ' ') + ' ' + S.currency;
+const money = (n) => Math.round(n).toLocaleString('ru-RU').replace(/ /g, ' ') + ' ' + PERS().currency;
 const dayLabel = (s) => {
   const t = today();
   if (s === t) return 'Сегодня';
@@ -339,6 +345,71 @@ const Store = {
 };
 let saveT;
 const save = () => { clearTimeout(saveT); saveT = setTimeout(() => Store.write(S), 300); };
+
+/* ============ Сервер (Cloudflare) ============
+   Если мини-апп открыт с нашего сервера, данные хранятся там:
+   личные и общий семейный раздел. Иначе — как раньше, локально. */
+let MODE = 'local', SCOPE = 'personal', SRV = null;
+const PERS = () => (MODE === 'server' ? SRV.personal : S);
+const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events'];
+const emptyS = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [] });
+const isEmptyS = (st) => !st || COLS.every(c => !st[c] || !st[c].length);
+async function api(action, body = {}) {
+  const r = await fetch('api/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData: tg ? tg.initData : '', ...body }) });
+  let j = null; try { j = await r.json(); } catch (e) {}
+  if (!j) throw new Error('HTTP ' + r.status);
+  return j;
+}
+function applyServer(r) {
+  SRV = r;
+  for (const k of ['personal', 'family']) SRV[k] = Object.assign(emptyS(), SRV[k] || {});
+  if (!SRV.personal.name) SRV.personal.name = r.me.name;
+  S = SRV[SCOPE];
+}
+function setScopeState(st) { S = st; if (MODE === 'server') SRV[SCOPE] = st; }
+const PKEY = 'myday_pending';
+let pending = (() => { try { return JSON.parse(localStorage.getItem(PKEY)) || []; } catch (e) { return []; } })();
+const savePending = () => { try { localStorage.setItem(PKEY, JSON.stringify(pending)); } catch (e) {} };
+function persist(ops, scope = SCOPE) {
+  if (MODE !== 'server') { save(); return; }
+  if (!ops.length) return;
+  pending.push({ scope, ops }); savePending(); flush();
+}
+let flushing = false, warned = false;
+async function flush() {
+  if (flushing || !pending.length) return;
+  flushing = true;
+  try {
+    while (pending.length) {
+      const r = await api('ops', pending[0]);
+      if (!r.ok) throw new Error(r.error);
+      pending.shift(); savePending();
+    }
+    warned = false;
+  } catch (e) {
+    if (!warned) { toast('Нет связи с сервером. Изменения сохранятся, когда связь появится.'); warned = true; }
+    setTimeout(flush, 8000);
+  } finally { flushing = false; }
+}
+async function refresh() {
+  if (MODE !== 'server' || pending.length || flushing || document.hidden || $('#sheetWrap').classList.contains('open')) return;
+  const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+  try {
+    const r = await api('load');
+    if (!r.ok || pending.length) return;
+    if (JSON.stringify([SRV.personal, SRV.family, SRV.members]) === JSON.stringify([Object.assign(emptyS(), r.personal, { name: r.personal.name || r.me.name }), Object.assign(emptyS(), r.family), r.members])) return;
+    applyServer(r); render();
+  } catch (e) {}
+}
+setInterval(refresh, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+const scopeBar = () => MODE !== 'server' ? '' : `
+  <div class="seg scopebar" role="radiogroup" aria-label="Раздел">
+    <label><input type="radio" name="scope" value="personal" ${SCOPE === 'personal' ? 'checked' : ''}><span>Личное</span></label>
+    <label><input type="radio" name="scope" value="family" ${SCOPE === 'family' ? 'checked' : ''}><span>Семья${SRV.members.length > 1 ? ' · ' + SRV.members.length : ''}</span></label>
+  </div>
+  ${SCOPE === 'family' && SRV.members.length < 2 ? `<p class="hint" style="margin:-6px 2px 12px">Здесь общие дела, события и расходы семьи. Пригласи близких: ⚙️ на главной, «Пригласить в семью».</p>` : ''}`;
+
 
 /* ============ Данные ============ */
 const CATS = {
@@ -429,7 +500,7 @@ const fmtThought = (s) => esc(s).replace(/#([\p{L}\p{N}_]+)/gu, '<span class="ta
 const thoughtCard = (t) => `
   <article class="thought ${t.pin ? 'pin' : ''}">
     <p>${fmtThought(t.text)}</p>
-    <div class="meta"><span class="sp">${ago(t.ts)}</span>
+    <div class="meta"><span class="sp">${ago(t.ts)}${t.by && SCOPE === 'family' ? ', ' + esc(t.by) : ''}</span>
       <button class="pinb" data-act="pinThought" data-id="${t.id}" aria-label="${t.pin ? 'Открепить' : 'Закрепить'}">${I.pin}</button>
       <button data-act="delThought" data-id="${t.id}" aria-label="Удалить мысль">${I.trash}</button>
     </div>
@@ -461,7 +532,7 @@ V.home = () => {
   return `
   <section class="hero">
     <button class="iconbtn gear" data-act="settings" aria-label="Настройки">${I.gear}</button>
-    <div class="greet">${greet}, ${esc(S.name)}</div>
+    <div class="greet">${greet}, ${esc(PERS().name)}</div>
     <div class="date">${now.getDate()} ${MON_S[now.getMonth()]}</div>
     <div class="wd">${WD[now.getDay()]}</div>
     <div class="mut" style="font-size:13px;margin-top:14px;max-width:60%">${total ? `Сделано ${doneAll} из ${total}: дела и привычки на сегодня` : 'На сегодня пока пусто'}</div>
@@ -621,7 +692,7 @@ const F = {
         <label class="f"><span>Время</span><input class="inp" type="time" name="time" value="${t.time || ''}"></label>
       </div>
       <div class="f"><span>Приоритет</span>${radios('prio', [['0', 'Обычный'], ['1', '<i class="prio p1"></i> Важно'], ['2', '<i class="prio p2"></i> Срочно']], t.prio || 0)}</div>
-      <p class="hint">Оставь дату пустой, и задача попадёт в список «Без даты».</p>
+      <p class="hint">Оставь дату пустой, и задача попадёт в список «Без даты».${MODE === 'server' ? ' Если указать время, бот напомнит.' : ''}</p>
       <button class="btn">Сохранить</button>${delBtn('delTask', t.id)}
     </form>`,
   event: (e = {}) => `
@@ -633,7 +704,7 @@ const F = {
         <label class="f"><span>Время</span><input class="inp" type="time" name="time" value="${e.time || ''}"></label>
       </div>
       <label class="f"><span>Напомнить</span><select class="inp" name="remind">${REMIND.map(([v, l]) => `<option value="${v}" ${String(e.remind ?? '60') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <p class="hint">Сообщение от бота придёт в Telegram, когда подключим сервер с напоминаниями.</p>
+      <p class="hint">${MODE === 'server' ? 'Напоминание придёт сообщением от бота.' : 'Напоминания от бота работают, когда приложение открыто через бота.'}</p>
       <label class="f"><span>Заметка</span><input class="inp" name="note" maxlength="300" value="${esc(e.note || '')}" placeholder="Адрес, телефон, что взять"></label>
       <button class="btn">Сохранить</button>${delBtn('delEvent', e.id)}
     </form>`,
@@ -650,7 +721,7 @@ const F = {
     <h3>${o.id ? 'Запись' : 'Новая запись'}</h3>
     <form data-form="op"><input type="hidden" name="id" value="${o.id || ''}">
       <div class="f">${radios('type', [['out', 'Расход'], ['in', 'Доход']], type, 'seg')}</div>
-      <label class="f"><span>Сумма, ${S.currency}</span><input class="inp big" name="amount" inputmode="decimal" required autocomplete="off" value="${o.amount || ''}" placeholder="0"></label>
+      <label class="f"><span>Сумма, ${PERS().currency}</span><input class="inp big" name="amount" inputmode="decimal" required autocomplete="off" value="${o.amount || ''}" placeholder="0"></label>
       <div class="f"><span>Категория</span><div id="catBox">${catPick(type, o.cat)}</div></div>
       <div class="two">
         <label class="f"><span>Дата</span><input class="inp" type="date" name="date" required value="${o.date || today()}"></label>
@@ -659,18 +730,28 @@ const F = {
       <button class="btn" style="background:var(--violet);color:#160d3a">Сохранить</button>${delBtn('delOp', o.id)}
     </form>`;
   },
-  settings: () => `
+  settings: () => {
+    const P = PERS(), me = MODE === 'server' ? SRV.me : null;
+    return `
     <h3>Настройки</h3>
     <form data-form="settings">
-      <label class="f"><span>Как к тебе обращаться</span><input class="inp" name="name" maxlength="40" value="${esc(S.name)}"></label>
-      <div class="f"><span>Валюта</span>${radios('currency', [['₽', '₽ рубль'], ['$', '$ доллар'], ['€', '€ евро'], ['¥', '¥ юань']], S.currency)}</div>
+      <label class="f"><span>Как к тебе обращаться</span><input class="inp" name="name" maxlength="40" value="${esc(P.name)}"></label>
+      <div class="f"><span>Валюта</span>${radios('currency', [['₽', '₽ рубль'], ['$', '$ доллар'], ['€', '€ евро'], ['¥', '¥ юань']], P.currency)}</div>
+      ${me ? `<div class="f"><span>Утренняя сводка в Telegram</span><div class="two">
+        <label class="sw"><input type="checkbox" name="digestOn" ${me.digestOn ? 'checked' : ''}>Присылать</label>
+        <input class="inp" type="time" name="digest" value="${me.digest || '08:00'}" aria-label="Время сводки"></div></div>` : ''}
       <button class="btn">Сохранить</button>
     </form>
+    ${me ? `<button class="btn sec" data-act="digestNow">Прислать сводку сейчас</button>
+      <div style="height:1px;background:var(--line);margin:18px 0"></div>
+      <div class="f"><span>Семья</span><div class="members">${SRV.members.map(m => `<span class="chip">${esc(m.name)}${m.id === me.id ? ' (ты)' : ''}</span>`).join('')}</div></div>
+      ${me.isOwner ? '<button class="btn sec" data-act="invite">Пригласить в семью</button>' : ''}` : ''}
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
-    <p class="hint" style="margin:0 0 10px">${cloudOK() ? 'Данные хранятся в облаке Telegram и видны на всех твоих устройствах.' : 'Сейчас данные хранятся только в этом браузере. Внутри Telegram они будут сохраняться в облако Telegram.'}</p>
-    <button class="btn sec" data-act="exportData">Скопировать резервную копию</button>
+    <p class="hint" style="margin:0 0 10px">${me ? 'Данные хранятся на твоём сервере в Cloudflare и видны на всех устройствах.' : cloudOK() ? 'Данные хранятся в облаке Telegram и видны на всех твоих устройствах.' : 'Сейчас данные хранятся только в этом браузере. Внутри Telegram они будут сохраняться в облако Telegram.'}</p>
+    <button class="btn sec" data-act="exportData">Скопировать резервную копию${me ? ' раздела' : ''}</button>
     <button class="btn sec" data-act="importOpen">Восстановить из копии</button>
-    <button class="btn ghost" data-act="wipe">Удалить все данные</button>`
+    <button class="btn ghost" data-act="wipe">${me && SCOPE === 'family' ? 'Удалить данные семьи' : 'Удалить все данные'}</button>`;
+  }
 };
 const catPick = (type, val) => radios('cat', CATS[type].map(([n, e]) => [n, `${e} ${n}`]), val || CATS[type][0][0]);
 
@@ -694,24 +775,25 @@ function toast(text, undo) {
   $('#toast').classList.add('show'); clearTimeout(toastT);
   toastT = setTimeout(() => $('#toast').classList.remove('show'), 3500);
 }
-$('#toastUndo').addEventListener('click', () => { if (undoFn) { undoFn(); undoFn = null; commit(); } $('#toast').classList.remove('show'); });
+$('#toastUndo').addEventListener('click', () => { if (undoFn) { const op = undoFn(); undoFn = null; commit(op); } $('#toast').classList.remove('show'); });
 
 /* ============ Действия ============ */
 const find = (arr, id) => S[arr].find(x => x.id === id);
 const removeWithUndo = (arr, id, label) => {
   const i = S[arr].findIndex(x => x.id === id); if (i < 0) return;
   const [item] = S[arr].splice(i, 1);
-  closeSheet(); commit(); hap('medium');
-  toast(label, () => S[arr].splice(i, 0, item));
+  closeSheet(); commit(['del', arr, id]); hap('medium');
+  toast(label, () => { S[arr].splice(i, 0, item); return ['put', arr, item]; });
 };
-function commit() { save(); render(); }
+const byMe = (o) => (MODE === 'server' && SCOPE === 'family' ? Object.assign(o, { by: SRV.me.name }) : o);
+function commit(...ops) { persist(ops.filter(Boolean)); render(); }
 
 const A = {
   closeSheet,
   settings: () => openSheet(F.settings()),
   newTask: () => openSheet(F.task()),
   editTask: (d) => openSheet(F.task(find('tasks', d.id))),
-  toggleTask: (d) => { const t = find('tasks', d.id); t.done = !t.done; hap(t.done ? 'ok' : 'light'); commit(); },
+  toggleTask: (d) => { const t = find('tasks', d.id); t.done = !t.done; hap(t.done ? 'ok' : 'light'); commit(['put', 'tasks', t]); },
   delTask: (d) => removeWithUndo('tasks', d.id, 'Задача удалена'),
   newEvent: () => openSheet(F.event()),
   editEvent: (d) => openSheet(F.event(find('events', d.id))),
@@ -719,8 +801,8 @@ const A = {
   newHabit: () => openSheet(F.habit()),
   editHabit: (d) => openSheet(F.habit(find('habits', d.id))),
   delHabit: (d) => removeWithUndo('habits', d.id, 'Привычка удалена'),
-  habit: (d) => { const h = find('habits', d.id); if (h.done[d.day]) delete h.done[d.day]; else { h.done[d.day] = true; hap('ok'); } commit(); },
-  pinThought: (d) => { const t = find('thoughts', d.id); t.pin = !t.pin; hap('sel'); commit(); },
+  habit: (d) => { const h = find('habits', d.id); if (h.done[d.day]) delete h.done[d.day]; else { h.done[d.day] = true; hap('ok'); } commit(['put', 'habits', h]); },
+  pinThought: (d) => { const t = find('thoughts', d.id); t.pin = !t.pin; hap('sel'); commit(['put', 'thoughts', t]); },
   delThought: (d) => removeWithUndo('thoughts', d.id, 'Мысль удалена'),
   thTag: (d) => { UI.thTag = d.tag; hap('sel'); render(); },
   newOp: () => openSheet(F.op()),
@@ -738,50 +820,89 @@ const A = {
   importOpen: () => openSheet(`<h3>Восстановить из копии</h3><form data-form="import"><p class="hint">Вставь текст резервной копии. Текущие данные заменятся.</p><textarea class="inp" name="json" style="min-height:180px" required></textarea><button class="btn">Восстановить</button></form>`),
   wipe: (d, el) => {
     if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Нажми ещё раз, чтобы удалить всё'; return; }
-    S = { v: 1, name: S.name, currency: S.currency, thoughts: [], habits: [], money: [], tasks: [], events: [] };
-    closeSheet(); commit(); toast('Все данные удалены');
-  }
+    setScopeState(Object.assign(emptyS(), { name: S.name, currency: S.currency }));
+    closeSheet(); commit(['replace', S]); toast(MODE === 'server' && SCOPE === 'family' ? 'Данные семьи удалены' : 'Все данные удалены');
+  },
+  digestNow: async () => {
+    try {
+      const r = await api('digest');
+      toast(r.ok ? 'Сводка отправлена в чат с ботом' : r.error === 'not_started' ? 'Сначала нажми Start в чате с ботом' : 'Не получилось отправить сводку');
+    } catch (e) { toast('Нет связи с сервером'); }
+  },
+  invite: async () => {
+    try {
+      const r = await api('invite'); if (!r.ok) throw 0;
+      openSheet(`<h3>Приглашение в семью</h3>
+        <p class="hint">Ссылка одноразовая и действует 7 дней. Кто откроет её и нажмёт Start, попадёт в раздел «Семья», а свой личный раздел у него будет отдельный.</p>
+        <textarea class="inp" readonly style="min-height:70px">${esc(r.link)}</textarea>
+        <button class="btn" data-act="shareLink" data-link="${esc(r.link)}">Отправить в Telegram</button>
+        <button class="btn sec" data-act="copyLink" data-link="${esc(r.link)}">Скопировать ссылку</button>`);
+    } catch (e) { toast('Не получилось создать приглашение'); }
+  },
+  shareLink: (d) => {
+    const u = 'https://t.me/share/url?url=' + encodeURIComponent(d.link) + '&text=' + encodeURIComponent('Присоединяйся к нашему семейному «Мой день»');
+    try { tg.openTelegramLink(u); } catch (e) { A.copyLink(d); }
+  },
+  copyLink: async (d) => { try { await navigator.clipboard.writeText(d.link); toast('Ссылка скопирована'); } catch (e) { toast('Выдели ссылку и скопируй вручную'); } },
+  migrate: () => {
+    const local = window.__localData; if (!local) return closeSheet();
+    SRV.personal = Object.assign(emptyS(), local, { name: local.name || SRV.me.name });
+    if (SCOPE === 'personal') S = SRV.personal;
+    persist([['replace', SRV.personal]], 'personal');
+    closeSheet(); render(); toast('Записи перенесены на сервер');
+  },
+  skipMigrate: () => { try { localStorage.setItem('myday_nomigrate', '1'); } catch (e) {} closeSheet(); }
 };
 
 const FORMS = {
   thought: (fd, f) => {
     const text = (fd.get('text') || '').trim(); if (!text) return;
-    S.thoughts.unshift({ id: uid(), text, pin: false, ts: Date.now() });
-    f.reset(); hap('ok'); commit(); toast('Мысль сохранена');
+    const t = byMe({ id: uid(), text, pin: false, ts: Date.now() });
+    S.thoughts.unshift(t);
+    f.reset(); hap('ok'); commit(['put', 'thoughts', t]); toast('Мысль сохранена');
   },
   task: (fd) => {
     const o = { title: fd.get('title').trim(), date: fd.get('date') || '', time: fd.get('time') || '', prio: +fd.get('prio') || 0 };
     const id = fd.get('id');
-    if (id) Object.assign(find('tasks', id), o); else S.tasks.push({ id: uid(), done: false, ...o });
-    closeSheet(); hap('ok'); commit(); toast(id ? 'Задача сохранена' : 'Задача добавлена');
+    let it; if (id) it = Object.assign(find('tasks', id), o); else S.tasks.push(it = byMe({ id: uid(), done: false, ...o }));
+    closeSheet(); hap('ok'); commit(['put', 'tasks', it]); toast(id ? 'Задача сохранена' : 'Задача добавлена');
   },
   event: (fd) => {
     const o = { title: fd.get('title').trim(), date: fd.get('date'), time: fd.get('time') || '', remind: fd.get('remind'), note: (fd.get('note') || '').trim() };
     const id = fd.get('id');
-    if (id) Object.assign(find('events', id), o); else S.events.push({ id: uid(), ...o });
-    closeSheet(); hap('ok'); commit(); toast(id ? 'Событие сохранено' : 'Событие добавлено');
+    let it; if (id) it = Object.assign(find('events', id), o); else S.events.push(it = byMe({ id: uid(), ...o }));
+    closeSheet(); hap('ok'); commit(['put', 'events', it]); toast(id ? 'Событие сохранено' : 'Событие добавлено');
   },
   habit: (fd) => {
     const o = { title: fd.get('title').trim(), emoji: fd.get('emoji') || '🎯' };
     const id = fd.get('id');
-    if (id) Object.assign(find('habits', id), o); else S.habits.push({ id: uid(), done: {}, ...o });
-    closeSheet(); hap('ok'); commit(); toast(id ? 'Привычка сохранена' : 'Привычка добавлена');
+    let it; if (id) it = Object.assign(find('habits', id), o); else S.habits.push(it = byMe({ id: uid(), done: {}, ...o }));
+    closeSheet(); hap('ok'); commit(['put', 'habits', it]); toast(id ? 'Привычка сохранена' : 'Привычка добавлена');
   },
   op: (fd, f) => {
     const amount = parseFloat(String(fd.get('amount')).replace(/\s/g, '').replace(',', '.'));
     if (!(amount > 0)) { const a = f.querySelector('[name=amount]'); a.focus(); a.style.borderColor = 'var(--red)'; return; }
     const o = { type: fd.get('type'), amount, cat: fd.get('cat'), date: fd.get('date'), note: (fd.get('note') || '').trim() };
     const id = fd.get('id');
-    if (id) Object.assign(find('money', id), o); else S.money.push({ id: uid(), ...o });
+    let it; if (id) it = Object.assign(find('money', id), o); else S.money.push(it = byMe({ id: uid(), ...o }));
     UI.mMonth = o.date.slice(0, 7);
-    closeSheet(); hap('ok'); commit(); toast(id ? 'Запись сохранена' : 'Запись добавлена');
+    closeSheet(); hap('ok'); commit(['put', 'money', it]); toast(id ? 'Запись сохранена' : 'Запись добавлена');
   },
-  settings: (fd) => { S.name = fd.get('name').trim() || S.name; S.currency = fd.get('currency') || S.currency; closeSheet(); commit(); toast('Настройки сохранены'); },
+  settings: async (fd) => {
+    const P = PERS();
+    P.name = (fd.get('name') || '').trim() || P.name; P.currency = fd.get('currency') || P.currency;
+    persist([['meta', { name: P.name, currency: P.currency }]], 'personal');
+    if (MODE === 'server') {
+      try { const r = await api('profile', { digestOn: fd.get('digestOn') === 'on', digest: fd.get('digest') || '08:00' }); if (r.ok) SRV.me = r.me; }
+      catch (e) { toast('Время сводки не сохранилось: нет связи'); }
+    }
+    closeSheet(); render(); toast('Настройки сохранены');
+  },
   import: (fd) => {
     try {
       const d = JSON.parse(fd.get('json'));
       if (!d || !Array.isArray(d.tasks) || !Array.isArray(d.thoughts)) throw 0;
-      S = Object.assign({ habits: [], money: [], events: [] }, d); closeSheet(); commit(); toast('Данные восстановлены');
+      setScopeState(Object.assign(emptyS(), d)); closeSheet(); commit(['replace', S]); toast('Данные восстановлены');
     } catch (e) { toast('Это не похоже на резервную копию. Проверь, что текст вставлен целиком.'); }
   }
 };
@@ -805,6 +926,7 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.name === 'type' && e.target.closest('[data-form=op]')) $('#catBox').innerHTML = catPick(e.target.value);
+  if (e.target.name === 'scope' && MODE === 'server') { SCOPE = e.target.value; S = SRV[SCOPE]; hap('sel'); render(); }
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeSheet();
@@ -819,19 +941,43 @@ function render() {
   const v = VIEWS.includes(h) ? h : 'home';
   const changed = v !== UI.view; UI.view = v;
   const el = $('#view');
-  el.innerHTML = `<div class="${changed ? 'view' : ''}">${V[v]()}</div>`;
+  el.innerHTML = `<div class="${changed ? 'view' : ''}">${scopeBar()}${V[v]()}</div>`;
   document.querySelectorAll('.tab').forEach(t => { t.classList.toggle('on', t.dataset.v === v); t.setAttribute('aria-current', t.dataset.v === v ? 'page' : 'false'); });
   if (changed) window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', render);
 
 /* ============ Старт ============ */
-Store.load().then((d) => {
+async function boot() {
+  if (inTG) {
+    try {
+      const r = await api('load', { tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+      if (r.ok) {
+        MODE = 'server'; applyServer(r); UI.view = ''; render(); flush();
+        let skip = false; try { skip = localStorage.getItem('myday_nomigrate') === '1'; } catch (e) {}
+        const local = skip ? null : await Store.load();
+        if (local && local.v && !isEmptyS(local) && isEmptyS(SRV.personal)) {
+          window.__localData = local;
+          const n = COLS.reduce((a, c) => a + (local[c] || []).length, 0);
+          openSheet(`<h3>Перенести старые записи?</h3><p class="hint" style="margin-bottom:14px">В Telegram сохранено ${n} ${plural(n, 'запись', 'записи', 'записей')} из прошлой версии. Перенести их в твой личный раздел на сервере? Если это просто примеры, нажми «Не нужно».</p>
+            <button class="btn" data-act="migrate">Перенести</button><button class="btn sec" data-act="skipMigrate">Не нужно</button>`);
+        }
+        return;
+      }
+      if (r.error === 'not_member') {
+        document.querySelector('.tabs').classList.add('hidden');
+        $('#view').innerHTML = `<div class="locked"><h1>Это семейное приложение</h1><p class="mut">Чтобы пользоваться им, попроси владельца прислать тебе ссылку-приглашение и открой её.</p></div>`;
+        return;
+      }
+    } catch (e) { /* сервера нет — работаем локально */ }
+  }
+  const d = await Store.load();
   S = d && d.v ? d : demo();
   if (!d) save();
   UI.view = '';
   render();
-});
+}
+boot();
 </script>
 </body>
 </html>

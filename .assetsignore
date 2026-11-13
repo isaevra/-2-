@@ -1,0 +1,12 @@
+.git
+.github
+.assetsignore
+src
+test
+node_modules
+wrangler.toml
+package.json
+package-lock.json
+README.md
+.nojekyll
+.wrangler

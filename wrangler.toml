@@ -1,0 +1,25 @@
+# Настройки воркера Cloudflare для «Мой день».
+# Имя воркера в Cloudflare должно совпадать с name ниже.
+name = "my-day"
+main = "src/worker.js"
+compatibility_date = "2025-11-01"
+
+# Мини-апп (index.html) раздаётся этим же воркером
+[assets]
+directory = "."
+
+# Хранилище данных (бесплатный SQLite Durable Object)
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "Store"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Store"]
+
+# Проверка напоминаний и утренней сводки — каждую минуту
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
