@@ -658,6 +658,15 @@ V.habits = () => {
   : `<div class="card empty" style="text-align:center;padding:28px 16px">Начни с одной маленькой привычки, которую точно сможешь делать каждый день.<br><br><button data-act="newHabit">Добавить привычку</button></div>`}`;
 };
 
+function zenDiag() {
+  const g = SRV.zen && SRV.zen.diag; if (!g) return '';
+  const rows = g.body !== undefined
+    ? [['Ответ Дзен-мани', 'код ' + g.status], ['Текст ответа', g.body || '(пусто)']]
+    : [['Последняя загрузка', (g.full ? 'полная, ' : 'обновление, ') + (g.at ? ago(g.at) : '')], ['Пришло операций', g.tx], ['Добавлено', g.added],
+       ['Старше ' + g.since, g.old], ['Переводы', g.transfer], ['Удалённые', g.removed + g.del], ['Счетов / категорий', g.acc + ' / ' + g.tags],
+       ['Даты операций', g.minDate ? g.minDate + ' … ' + g.maxDate : 'нет'], ['Поля ответа', (g.keys || []).join(', ') || 'нет']];
+  return `<div class="card" style="background:var(--slab2);font-size:13px;margin-bottom:12px"><h2 style="font-size:14px">Диагностика</h2>${rows.map(([a, b]) => `<div class="row" style="justify-content:space-between;align-items:flex-start;padding:3px 0"><span class="mut">${a}</span><span style="text-align:right;overflow-wrap:anywhere;max-width:60%">${esc(b)}</span></div>`).join('')}</div>`;
+}
 function zenCard() {
   if (MODE !== 'server' || SCOPE !== 'personal') return '';
   const z = SRV.zen || { connected: false };
@@ -895,6 +904,7 @@ const A = {
   },
   zenMenu: () => openSheet(`<h3>Дзен-мани</h3>
     <p class="hint" style="margin-bottom:12px">Операции обновляются сами примерно раз в 30 минут.</p>
+    ${zenDiag()}
     <button class="btn sec" data-act="zenFull">Загрузить заново за 2 месяца</button>
     <button class="btn sec" data-act="zenOpen">Поменять токен</button>
     <button class="btn ghost" data-act="zenOff">Отключить</button>`),

@@ -225,15 +225,19 @@ export function zenDiffToOps(d, z, since) {
   for (const a of d.account || []) if (a && a.id) accounts[a.id] = a.title;
   for (const i of d.instrument || []) if (i && i.id != null) instr[i.id] = i.shortTitle;
   const ops = [];
+  const diag = { keys: Object.keys(d || {}).slice(0, 20), tx: (d.transaction || []).length, tags: (d.tag || []).length, acc: (d.account || []).length, del: (d.deletion || []).length,
+    old: 0, transfer: 0, zero: 0, removed: 0, added: 0, minDate: '', maxDate: '', since };
+  for (const t of d.transaction || []) if (t && t.date) { if (!diag.minDate || t.date < diag.minDate) diag.minDate = t.date; if (t.date > diag.maxDate) diag.maxDate = t.date; }
   for (const del of d.deletion || []) if (del && del.object === 'transaction') ops.push(['del', 'money', 'zm_' + del.id]);
   for (const t of d.transaction || []) {
     if (!t || !t.id) continue;
     const id = 'zm_' + t.id;
-    if (t.deleted) { ops.push(['del', 'money', id]); continue; }
-    if (!t.date || t.date < since) continue;
+    if (t.deleted) { ops.push(['del', 'money', id]); diag.removed++; continue; }
+    if (!t.date || t.date < since) { diag.old++; continue; }
     const inc = Number(t.income) || 0, out = Number(t.outcome) || 0;
-    if (inc > 0 && out > 0) { ops.push(['del', 'money', id]); continue; } // перевод между счетами
-    if (!inc && !out) continue;
+    if (inc > 0 && out > 0) { ops.push(['del', 'money', id]); diag.transfer++; continue; } // перевод между счетами
+    if (!inc && !out) { diag.zero++; continue; }
+    diag.added++;
     const type = inc > 0 ? 'in' : 'out';
     const tagId = Array.isArray(t.tag) && t.tag.length ? t.tag[0] : null;
     const cat = (tagId && tags[tagId]) || (type === 'in' ? 'Доход' : 'Без категории');
@@ -244,5 +248,5 @@ export function zenDiffToOps(d, z, since) {
       acc: accounts[type === 'in' ? t.incomeAccount : t.outcomeAccount] || ''
     }]);
   }
-  return { ops, tags, accounts, instr, ts: Number(d.serverTimestamp) || z.ts || 0 };
+  return { ops, tags, accounts, instr, diag, ts: Number(d.serverTimestamp) || z.ts || 0 };
 }

@@ -121,7 +121,7 @@ export class Store extends DurableObject {
   /* ---------- Дзен-мани ---------- */
   async zenStatus(uid) {
     const z = await this.ctx.storage.get('zen:' + uid);
-    return z ? { connected: true, lastSync: z.lastSync || 0, error: z.error || '', count: z.count || 0, accounts: Object.keys(z.accounts || {}).length } : { connected: false };
+    return z ? { connected: true, lastSync: z.lastSync || 0, error: z.error || '', count: z.count || 0, accounts: Object.keys(z.accounts || {}).length, diag: z.diag || null } : { connected: false };
   }
   async zenSync(user, full = false) {
     const key = 'zen:' + user.id;
@@ -142,13 +142,15 @@ export class Store extends DurableObject {
       if (first && !full && user.started) await this.send(user.id, '⚠️ Дзен-мани перестал пускать бота: токен устарел. Открой «Финансы» и подключи Дзен-мани заново.');
       return { ok: false, error: 'token' };
     }
-    if (!res.ok) { z.error = 'http_' + res.status; await this.ctx.storage.put(key, z); return { ok: false, error: z.error }; }
-    try { d = await res.json(); } catch (e) { z.error = 'bad_json'; await this.ctx.storage.put(key, z); return { ok: false, error: 'bad_json' }; }
+    const raw = await res.text();
+    if (!res.ok) { z.error = 'http_' + res.status; z.diag = { status: res.status, body: raw.slice(0, 300) }; await this.ctx.storage.put(key, z); return { ok: false, error: z.error }; }
+    try { d = JSON.parse(raw); } catch (e) { z.error = 'bad_json'; z.diag = { status: res.status, body: raw.slice(0, 300) }; await this.ctx.storage.put(key, z); return { ok: false, error: 'bad_json' }; }
+    if (!d || typeof d !== 'object' || d.error) { z.error = 'api'; z.diag = { status: res.status, body: raw.slice(0, 300) }; await this.ctx.storage.put(key, z); return { ok: false, error: 'api' }; }
     const since = firstOfPrevMonth(partsIn(user.tz || DEF_TZ).ymd);
     const r = zenDiffToOps(d, z, since);
     const st = applyOps(await this.data('u:' + user.id), r.ops);
     await this.putData('u:' + user.id, st);
-    Object.assign(z, { ts: r.ts, tags: r.tags, accounts: r.accounts, instr: r.instr, error: '', count: st.money.filter(o => o.src === 'zen').length });
+    Object.assign(z, { ts: r.ts, tags: r.tags, accounts: r.accounts, instr: r.instr, error: '', count: st.money.filter(o => o.src === 'zen').length, diag: { status: res.status, full, at: Date.now(), ...r.diag } });
     await this.ctx.storage.put(key, z);
     return { ok: true, changed: r.ops.length };
   }
