@@ -4,8 +4,12 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   DEF_TZ, emptyState, applyOps, checkInitData, webhookSecret, validTz,
   dueReminders, buildDigest, digestDue, escHtml,
-  ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE
+  ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE,
+  parseIcs, expandIcs, shortHash, shiftYmd
 } from './lib.js';
+
+const CAL_EVERY = 20 * 60e3; // как часто обновлять календарь
+const CAL_REMIND = ['', '0', '15', '30', '60', '180', '1440'];
 
 const COMMANDS = [
   { command: 'today', description: 'Сводка на сегодня' },
@@ -71,7 +75,7 @@ export class Store extends DurableObject {
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
       await this.putMeta(meta);
-      return { ok: true, me: pub(), members: members(), bot: meta.bot, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id), family: await this.data('family') };
+      return { ok: true, me: pub(), members: members(), bot: meta.bot, zen: await this.zenStatus(me.id), cal: await this.calStatus(me.id), personal: await this.data('u:' + me.id), family: await this.data('family') };
     }
     if (action === 'ops') {
       const key = body.scope === 'family' ? 'family' : 'u:' + me.id;
@@ -123,7 +127,72 @@ export class Store extends DurableObject {
       }
       return { ok: true, zen: await this.zenStatus(me.id), personal: await this.data('u:' + me.id) };
     }
+    if (action === 'calConnect') {
+      let url = String(body.url || '').trim().replace(/^webcal:\/\//i, 'https://');
+      if (!/^https:\/\/[^\s]+$/i.test(url) || url.length > 1000) return { ok: false, error: 'bad_url' };
+      const prev = (await this.ctx.storage.get('cal:' + me.id)) || {};
+      await this.ctx.storage.put('cal:' + me.id, { url, remind: prev.remind ?? '30', share: prev.share ?? true, lastSync: 0, error: '' });
+      const r = await this.calSync(me);
+      if (!r.ok) await this.ctx.storage.delete('cal:' + me.id);
+      return { ...r, ...(await this.calPayload(me.id)) };
+    }
+    if (action === 'calSync') return { ...(await this.calSync(me)), ...(await this.calPayload(me.id)) };
+    if (action === 'calSettings') {
+      const c = await this.ctx.storage.get('cal:' + me.id);
+      if (!c) return { ok: false, error: 'not_connected' };
+      if (CAL_REMIND.includes(String(body.remind))) c.remind = String(body.remind);
+      if (typeof body.share === 'boolean') c.share = body.share;
+      await this.ctx.storage.put('cal:' + me.id, c);
+      return { ...(await this.calSync(me)), ...(await this.calPayload(me.id)) };
+    }
+    if (action === 'calOff') {
+      await this.ctx.storage.delete('cal:' + me.id);
+      await this.calApply(me, [], null);
+      return { ok: true, ...(await this.calPayload(me.id)) };
+    }
     return { status: 404, error: 'unknown_action' };
+  }
+
+  /* ---------- Календарь по ссылке ---------- */
+  async calStatus(uid) {
+    const c = await this.ctx.storage.get('cal:' + uid);
+    return c ? { connected: true, lastSync: c.lastSync || 0, error: c.error || '', count: c.count || 0, remind: c.remind ?? '30', share: c.share !== false } : { connected: false };
+  }
+  async calPayload(uid) {
+    return { cal: await this.calStatus(uid), personal: await this.data('u:' + uid), family: await this.data('family') };
+  }
+  // Заменяет события календаря этого человека в его разделе и (если включено) в «Семье»
+  async calApply(user, occ, c) {
+    const id = (k) => 'cal_' + shortHash(user.id + '|' + k);
+    const pers = await this.data('u:' + user.id);
+    pers.events = (pers.events || []).filter(e => e.src !== 'cal').concat(occ.map(o => ({
+      id: id(o.key), title: o.title, date: o.date, time: o.time, end: o.end, note: o.location,
+      remind: o.time ? (c ? c.remind ?? '30' : '') : (c && c.remind === '1440' ? '1440' : ''), src: 'cal'
+    })));
+    await this.putData('u:' + user.id, pers);
+    const fam = await this.data('family');
+    fam.events = (fam.events || []).filter(e => !(e.src === 'cal' && e.calOwner === user.id)).concat(c && c.share !== false ? occ.map(o => ({
+      id: 'f' + id(o.key), title: o.title, date: o.date, time: o.time, end: o.end, note: o.location, remind: '', src: 'cal', calOwner: user.id, by: user.name
+    })) : []);
+    await this.putData('family', fam);
+  }
+  async calSync(user) {
+    const key = 'cal:' + user.id;
+    const c = await this.ctx.storage.get(key);
+    if (!c || !c.url) return { ok: false, error: 'not_connected' };
+    c.lastSync = Date.now();
+    const fail = async (error) => { c.error = error; await this.ctx.storage.put(key, c); return { ok: false, error }; };
+    let res;
+    try { res = await fetch(c.url, { headers: { 'user-agent': 'MyDayBot/1.0', accept: 'text/calendar,*/*' } }); } catch (e) { return fail('network'); }
+    if (!res.ok) return fail('http_' + res.status);
+    const text = await res.text();
+    if (!text.includes('BEGIN:VCALENDAR')) return fail('not_ics');
+    const tz = user.tz || DEF_TZ, today = partsIn(tz).ymd;
+    const occ = expandIcs(parseIcs(text), { from: shiftYmd(today, -3), to: shiftYmd(today, 60), tz });
+    await this.calApply(user, occ, c);
+    Object.assign(c, { error: '', count: occ.length });
+    await this.ctx.storage.put(key, c);
+    return { ok: true, count: occ.length };
   }
 
   /* ---------- Дзен-мани ---------- */
@@ -236,7 +305,7 @@ export class Store extends DurableObject {
   async sendDigest(meta, me, now, manual = false) {
     const pers = await this.data('u:' + me.id);
     const fam = await this.data('family');
-    const text = buildDigest({ name: pers.name || me.name, pers, fam, tz: me.tz || DEF_TZ, now, hasFamily: Object.keys(meta.users).length > 1 });
+    const text = buildDigest({ name: pers.name || me.name, pers, fam, tz: me.tz || DEF_TZ, now, hasFamily: Object.keys(meta.users).length > 1, uid: me.id });
     return this.send(me.id, text, { reply_markup: this.openBtn(meta), disable_notification: false });
   }
 
@@ -249,7 +318,7 @@ export class Store extends DurableObject {
     if (!users.length) return { users: 0 };
     const fam = await this.data('family');
     const hasFamily = Object.keys(meta.users).length > 1;
-    let sent = 0, zenDone = false; // за один тик — не больше одной синхронизации
+    let sent = 0, zenDone = false, calDone = false; // за один тик — не больше одной синхронизации
     for (const u of users) {
       const tz = u.tz || DEF_TZ;
       const pers = await this.data('u:' + u.id);
@@ -260,6 +329,10 @@ export class Store extends DurableObject {
         meta.sent[key] = now;
         const res = await this.send(u.id, r.text);
         if (res && res.ok) sent++;
+      }
+      if (!calDone) {
+        const c = await this.ctx.storage.get('cal:' + u.id);
+        if (c && c.url && now - (c.lastSync || 0) > CAL_EVERY) { calDone = true; await this.calSync(u); }
       }
       if (!zenDone) {
         const z = await this.ctx.storage.get('zen:' + u.id);
