@@ -222,6 +222,7 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .quick input:focus{border-color:rgba(77,141,255,.7)}
 .quick.shopq button{background:var(--blue);color:#fff}
 .chk.round{border-radius:50%}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
 .item.shop.done .chk{background:var(--green);border-color:var(--green)}
 .item .x{width:34px;height:34px;border-radius:10px;color:var(--mut);display:grid;place-items:center;flex:none}
 .item .x svg{width:16px;height:16px}
@@ -605,6 +606,7 @@ const showWho = () => MODE === 'server' && SRV.members.length > 1;
 function shopCommit(...ops) { persist(ops.filter(Boolean), shopScope()); render(); }
 const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const splitShop = (text) => String(text || '').split(/[,;\n]+/).map(x => x.trim().replace(/\s+/g, ' ').replace(/[.!]+$/, '')).filter(Boolean).map(x => capFirst(x.slice(0, 80))).slice(0, 30);
+const SHOP_COMMON = ['Молоко', 'Хлеб', 'Яйца', 'Сыр', 'Масло сливочное', 'Курица', 'Фарш', 'Мясо', 'Рыба', 'Картофель', 'Лук', 'Морковь', 'Помидоры', 'Огурцы', 'Бананы', 'Яблоки', 'Крупа', 'Макароны', 'Рис', 'Сахар', 'Чай', 'Кофе', 'Сметана', 'Творог', 'Кефир', 'Йогурт', 'Колбаса', 'Вода', 'Туалетная бумага', 'Средство для посуды', 'Стиральный порошок', 'Мусорные пакеты'];
 const shopTodo = () => (shopSt().shop || []).filter(x => !x.done).sort((a, b) => a.ts - b.ts);
 const XI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const shopRow = (x) => `
@@ -626,16 +628,19 @@ function shopHomeCard() {
 V.shop = () => {
   const all = shopSt().shop || [], todo = shopTodo();
   const bought = all.filter(x => x.done && !x.hidden).sort((a, b) => (b.doneTs || 0) - (a.doneTs || 0));
-  const seen = new Set(todo.map(x => x.text.toLowerCase()));
-  const again = all.filter(x => x.done && x.hidden).sort((a, b) => (b.doneTs || 0) - (a.doneTs || 0)).filter(x => { const k = x.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12);
+  const seen = new Set(all.filter(x => !x.hidden).map(x => x.text.toLowerCase()));
+  const hist = all.filter(x => x.done && x.hidden).sort((a, b) => (b.n || 1) - (a.n || 1) || (b.doneTs || 0) - (a.doneTs || 0))
+    .filter(x => { const k = x.text.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).map(x => ({ id: x.id, text: x.text }));
+  const common = SHOP_COMMON.filter(t => !seen.has(t.toLowerCase())).map(t => ({ text: t }));
+  const again = hist.concat(common).slice(0, 24);
   return `
   <div class="vhead"><h1>Покупки</h1><span class="sp"></span><span class="mut" style="font-weight:700">${todo.length || ''}</span></div>
   ${MODE === 'server' ? '<p class="hint" style="margin:-8px 2px 12px">Общий список для всей семьи. Можно и написать боту: «купить молоко, хлеб».</p>' : ''}
   <section class="card">${shopForm('Молоко, хлеб, яйца')}</section>
-  ${again.length ? `<div class="chips">${again.map(x => `<button class="chip" data-act="shopAgain" data-id="${x.id}">+ ${esc(x.text)}</button>`).join('')}</div>` : ''}
   <section class="card"><h2>Купить</h2>${todo.length ? todo.map(shopRow).join('') : '<div class="empty">Список пуст. Добавь, что нужно купить.</div>'}</section>
   ${bought.length ? `<section class="card"><h2>Куплено <span class="mut">${bought.length}</span></h2>${bought.map(shopRow).join('')}
-    <button class="btn sec" data-act="shopClear" style="margin-top:10px">Убрать купленные</button></section>` : ''}`;
+    <button class="btn sec" data-act="shopClear" style="margin-top:10px">Убрать купленные</button></section>` : ''}
+  ${again.length ? `<section class="card"><h2>Быстро добавить</h2><div class="chips wrap" style="margin:0">${again.map(x => x.id ? `<button class="chip" data-act="shopAgain" data-id="${x.id}">+ ${esc(x.text)}</button>` : `<button class="chip" data-act="shopAddText" data-text="${esc(x.text)}">+ ${esc(x.text)}</button>`).join('')}</div></section>` : ''}`;
 };
 
 V.plan = () => {
@@ -976,7 +981,7 @@ const A = {
   },
   shopToggle: (d) => {
     const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
-    x.done = !x.done; x.doneBy = x.done ? myName() : ''; x.doneTs = Date.now(); x.hidden = false;
+    x.done = !x.done; x.doneBy = x.done ? myName() : ''; x.doneTs = Date.now(); x.hidden = false; x.n = Math.max(0, (x.n || 0) + (x.done ? 1 : -1));
     hap(x.done ? 'ok' : 'light'); shopCommit(['put', 'shop', x]);
   },
   shopDel: (d) => {
@@ -987,6 +992,13 @@ const A = {
   shopAgain: (d) => {
     const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
     Object.assign(x, { done: false, hidden: false, doneBy: '', by: myName(), ts: Date.now() }); hap('light'); shopCommit(['put', 'shop', x]);
+  },
+  shopAddText: (d) => {
+    const st = shopSt(), k = d.text.toLowerCase(), ex = st.shop.find(x => x.text.toLowerCase() === k);
+    let item;
+    if (ex) { if (!ex.done) return; item = Object.assign(ex, { done: false, hidden: false, doneBy: '', by: myName(), ts: Date.now() }); }
+    else st.shop.push(item = { id: uid(), text: d.text, done: false, by: myName(), ts: Date.now() });
+    hap('light'); shopCommit(['put', 'shop', item]);
   },
   shopClear: () => {
     const st = shopSt(), ops = [], old = Date.now() - 90 * 864e5;
