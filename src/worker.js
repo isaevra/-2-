@@ -5,8 +5,9 @@ import {
   DEF_TZ, emptyState, applyOps, checkInitData, webhookSecret, validTz,
   dueReminders, buildDigest, digestDue, escHtml,
   ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE,
-  parseIcs, expandIcs, shortHash, shiftYmd
+  parseIcs, expandIcs, shortHash, shiftYmd, dueHabitReminders
 } from './lib.js';
+const HOOK_VER = 2; // вебхук принимает нажатия кнопок
 
 const CAL_EVERY = 20 * 60e3; // как часто обновлять календарь
 const CAL_REMIND = ['', '0', '15', '30', '60', '180', '1440'];
@@ -270,6 +271,7 @@ export class Store extends DurableObject {
 
   /* ---------- Сообщения боту ---------- */
   async webhook(update) {
+    if (update && update.callback_query) return this.onButton(update.callback_query);
     const msg = update && update.message;
     if (!msg || !msg.from || !msg.chat || msg.chat.type !== 'private') return;
     const meta = await this.meta();
@@ -338,6 +340,29 @@ export class Store extends DurableObject {
     return this.send(from.id, 'Пока понимаю только текст. Фото и голосовые научусь сохранять позже.');
   }
 
+  // Нажатие «✅ Готово» под напоминанием о привычке
+  async onButton(cq) {
+    const meta = await this.meta();
+    const answer = (text) => tg(this.env, 'answerCallbackQuery', { callback_query_id: cq.id, text });
+    const me = meta.users[cq.from && cq.from.id];
+    const m = String(cq.data || '').match(/^hd:([pf]):([^:]+):(\d{8})$/);
+    if (!me || !m) return answer('Не получилось');
+    const key = m[1] === 'f' ? 'family' : 'u:' + me.id;
+    const ymd = `${m[3].slice(0, 4)}-${m[3].slice(4, 6)}-${m[3].slice(6, 8)}`;
+    const st = await this.data(key);
+    const h = (st.habits || []).find(x => x.id === m[2]);
+    if (!h) return answer('Эта привычка уже удалена');
+    h.done = h.done || {};
+    const already = !!h.done[ymd];
+    h.done[ymd] = true;
+    await this.putData(key, st);
+    await answer(already ? 'Уже отмечено' : 'Отмечено ✅');
+    if (cq.message) {
+      const t = partsIn(me.tz || DEF_TZ).hm;
+      await tg(this.env, 'editMessageText', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, text: escHtml(cq.message.text || '') + `\n\n✅ Отмечено в ${t}`, parse_mode: 'HTML' });
+    }
+  }
+
   async sendDigest(meta, me, now, manual = false) {
     const pers = await this.data('u:' + me.id);
     const fam = await this.data('family');
@@ -349,6 +374,10 @@ export class Store extends DurableObject {
   async tick(now = Date.now()) {
     if (!this.env.BOT_TOKEN) return { skipped: 'no_token' };
     const meta = await this.meta();
+    if (meta.hookv !== HOOK_VER && meta.appUrl) {
+      const wh = await tg(this.env, 'setWebhook', { url: new URL('/tg', meta.appUrl).href, secret_token: await webhookSecret(this.env.BOT_TOKEN), allowed_updates: ['message', 'callback_query'] });
+      if (wh.ok) meta.hookv = HOOK_VER;
+    }
     if (meta.cmdv !== CMD_VER && meta.appUrl) { const cm = await tg(this.env, 'setMyCommands', { commands: COMMANDS }); if (cm.ok) meta.cmdv = CMD_VER; }
     const users = Object.values(meta.users).filter(u => u.started);
     if (!users.length) return { users: 0 };
@@ -359,11 +388,12 @@ export class Store extends DurableObject {
       const tz = u.tz || DEF_TZ;
       const pers = await this.data('u:' + u.id);
       const due = dueReminders(pers, tz, now, 'p').concat(hasFamily ? dueReminders(fam, tz, now, 'f').map(r => ({ ...r, text: '👨‍👩‍👧 ' + r.text })) : []);
-      for (const r of due) {
+      const hdue = dueHabitReminders(pers, tz, now, 'p', u.id).concat(dueHabitReminders(fam, tz, now, 'f', u.id));
+      for (const r of due.concat(hdue)) {
         const key = u.id + ':' + r.key;
         if (meta.sent[key]) continue;
         meta.sent[key] = now;
-        const res = await this.send(u.id, r.text);
+        const res = await this.send(u.id, r.text, r.cb ? { reply_markup: { inline_keyboard: [[{ text: '✅ Готово', callback_data: r.cb }]] } } : {});
         if (res && res.ok) sent++;
       }
       if (!calDone) {
@@ -394,7 +424,8 @@ export class Store extends DurableObject {
     const me = await tg(this.env, 'getMe');
     steps.push(['Бот найден', me.ok ? '@' + me.result.username : me.description]);
     if (me.ok) meta.bot = me.result.username;
-    const wh = await tg(this.env, 'setWebhook', { url: origin + '/tg', secret_token: await webhookSecret(this.env.BOT_TOKEN), allowed_updates: ['message'], drop_pending_updates: true });
+    const wh = await tg(this.env, 'setWebhook', { url: origin + '/tg', secret_token: await webhookSecret(this.env.BOT_TOKEN), allowed_updates: ['message', 'callback_query'], drop_pending_updates: true });
+    if (wh.ok) meta.hookv = HOOK_VER;
     steps.push(['Вебхук', wh.ok ? 'подключён' : wh.description]);
     const mb = await tg(this.env, 'setChatMenuButton', { menu_button: { type: 'web_app', text: 'Мой день', web_app: { url: meta.appUrl } } });
     steps.push(['Кнопка меню', mb.ok ? 'открывает ' + meta.appUrl : mb.description]);

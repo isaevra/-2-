@@ -540,14 +540,41 @@ const quickBox = () => `
 /* ============ Экраны ============ */
 const V = {};
 
+function remindToOpts(h) {
+  const meId = MODE === 'server' ? String(SRV.me.id) : '';
+  const cur = h.id ? String(h.remindTo ?? '') : (SCOPE === 'family' ? meId : 'me');
+  const opts = SCOPE === 'family'
+    ? [['', 'Никому']].concat(SRV.members.map(m => [String(m.id), String(m.id) === meId ? m.name + ' (мне)' : m.name]), [['all', 'Всем']])
+    : [['', 'Не напоминать'], ['me', 'Мне']];
+  return opts.map(([v, l]) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+}
+// Привычки со временем на сегодня: свои + семейные, назначенные мне
+function timedHabitsToday() {
+  const out = [];
+  for (const h of S.habits || []) if (h.time) out.push({ h, sc: SCOPE });
+  if (MODE === 'server' && SCOPE === 'personal') {
+    const me = String(SRV.me.id);
+    for (const h of SRV.family.habits || []) if (h.time && (String(h.remindTo) === me || h.remindTo === 'all')) out.push({ h, sc: 'family' });
+  }
+  return out;
+}
+const habitTodayRow = ({ h, sc }, t) => `
+  <div class="item shop ${h.done && h.done[t] ? 'done' : ''}">
+    <span class="time" style="background:rgba(61,214,140,.14);color:#9ff0c8">${h.time}</span>
+    <button class="t" style="text-align:left" data-act="habitAt" data-id="${h.id}" data-sc="${sc}" data-day="${t}">
+      <div class="ttl">${h.emoji || ''} ${esc(h.title)}</div>${h.note ? `<div class="sub">${esc(h.note)}</div>` : ''}
+    </button>
+    <button class="chk round" data-act="habitAt" data-id="${h.id}" data-sc="${sc}" data-day="${t}" aria-label="${h.done && h.done[t] ? 'Снять отметку' : 'Отметить'}">${I.check}</button>
+  </div>`;
 V.home = () => {
   const t = today(), now = new Date();
   const tt = S.tasks.filter(x => x.date === t);
   const overdue = S.tasks.filter(x => !x.done && x.date && x.date < t);
   const ev = S.events.filter(e => e.date === t).sort(byTime);
   const hd = S.habits.filter(h => h.done[t]).length;
-  const total = tt.length + S.habits.length;
-  const doneAll = tt.filter(x => x.done).length + hd;
+  const famMine = timedHabitsToday().filter(x => x.sc === 'family' && x.sc !== SCOPE).map(x => x.h);
+  const total = tt.length + S.habits.length + famMine.length;
+  const doneAll = tt.filter(x => x.done).length + hd + famMine.filter(h => h.done && h.done[t]).length;
   const pct = total ? Math.round(doneAll / total * 100) : 0;
   const ms = monthSum(t.slice(0, 7));
   const h = now.getHours();
@@ -579,9 +606,9 @@ V.home = () => {
   <section class="card">
     <h2>Сегодня <a href="#plan">План</a></h2>
     ${overdue.length ? `<div class="sub" style="color:var(--amber);font-weight:700;font-size:13px;margin-bottom:4px">Просрочено: ${overdue.length}</div>` + overdue.map(x => taskRow(x, true)).join('') : ''}
-    ${ev.map(eventRow).join('')}
+    ${[...ev.map(e => [e.time || '00:00', eventRow(e)]), ...timedHabitsToday().map(x => [x.h.time, habitTodayRow(x, t)])].sort((a, b) => a[0].localeCompare(b[0])).map(x => x[1]).join('')}
     ${open.map(x => taskRow(x)).join('')}
-    ${!ev.length && !tt.length && !overdue.length ? `<div class="empty">Дел на сегодня нет. <button data-act="newTask">Добавить задачу</button></div>` : ''}
+    ${!ev.length && !tt.length && !overdue.length && !timedHabitsToday().length ? `<div class="empty">Дел на сегодня нет. <button data-act="newTask">Добавить задачу</button></div>` : ''}
   </section>
 
   ${shopHomeCard()}
@@ -733,7 +760,7 @@ V.habits = () => {
       const last30 = Array.from({ length: 30 }, (_, i) => ymd(addDays(new Date(), -i))).filter(k => h.done[k]).length;
       return `<div class="habit">
         <button class="hn" data-act="editHabit" data-id="${h.id}"><span class="em">${h.emoji}</span>
-          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div><div class="st">${s ? `<b>${s} ${plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / 30 * 100)}% за месяц</div></span></button>
+          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div>${h.time || h.note ? `<div class="st" style="color:#b9c3d6">${h.time ? '⏰ ' + h.time + (h.note ? ' · ' : '') : ''}${esc(h.note || '')}</div>` : ''}<div class="st">${s ? `<b>${s} ${plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / 30 * 100)}% за месяц</div></span></button>
         <div class="hdots">${days.map(d => { const k = ymd(d); return `<div class="hd ${k === t ? 'today' : ''}"><button class="dot ${h.done[k] ? 'on' : ''} ${k === t ? 'today' : ''}" data-act="habit" data-id="${h.id}" data-day="${k}" aria-label="${esc(h.title)}, ${d.getDate()} ${MON_G[d.getMonth()]}" aria-pressed="${!!h.done[k]}"></button>${k === t ? 'сегодня' : WD_S[d.getDay()] + ' ' + d.getDate()}</div>`; }).join('')}</div>
       </div>`;
     }).join('')}`
@@ -829,6 +856,12 @@ const F = {
     <form data-form="habit"><input type="hidden" name="id" value="${h.id || ''}">
       <label class="f"><span>Название</span><input class="inp" name="title" required maxlength="60" value="${esc(h.title || '')}" placeholder="Например, 10 минут английского"></label>
       <div class="f"><span>Значок</span>${radios('emoji', EMOJI.map(x => [x, x]), h.emoji || EMOJI[0], 'pick emo')}</div>
+      <div class="two">
+        <label class="f"><span>Время (если нужно)</span><input class="inp" type="time" name="time" value="${h.time || ''}"></label>
+        ${MODE === 'server' ? `<label class="f"><span>Напоминать</span><select class="inp" name="remindTo">${remindToOpts(h)}</select></label>` : ''}
+      </div>
+      <label class="f"><span>Что входит</span><input class="inp" name="note" maxlength="200" value="${esc(h.note || '')}" placeholder="Например: инозитол, D3, омега-3 — с завтраком"></label>
+      <p class="hint">Привычка со временем появится в «Сегодня» на главной, а бот пришлёт напоминание с кнопкой «Готово». Если не отметить, через час напомнит ещё раз.</p>
       <button class="btn" style="background:var(--green);color:#03231a">Сохранить</button>${delBtn('delHabit', h.id)}
     </form>`,
   op: (o = {}) => {
@@ -1049,6 +1082,13 @@ const A = {
     if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Нажми ещё раз: его события исчезнут из бота'; return; }
     try { const r = await api('calRemove', { id: d.id }); calAfter(r); render(); A.calOpen(); if (!SRV.cal.connected) closeSheet(); toast('Календарь отключён'); } catch (e) { toast('Нет связи с сервером'); }
   },
+  habitAt: (d) => {
+    const st = d.sc === 'family' && MODE === 'server' ? SRV.family : S;
+    const h = (st.habits || []).find(x => x.id === d.id); if (!h) return;
+    h.done = h.done || {};
+    if (h.done[d.day]) delete h.done[d.day]; else { h.done[d.day] = true; hap('ok'); }
+    persist([['put', 'habits', h]], d.sc === 'family' && MODE === 'server' ? 'family' : SCOPE); render();
+  },
   shopToggle: (d) => {
     const x = (shopSt().shop || []).find(i => i.id === d.id); if (!x) return;
     x.done = !x.done; x.doneBy = x.done ? myName() : ''; x.doneTs = Date.now(); x.hidden = false; x.n = Math.max(0, (x.n || 0) + (x.done ? 1 : -1));
@@ -1100,7 +1140,7 @@ const FORMS = {
     closeSheet(); hap('ok'); commit(['put', 'events', it]); toast(id ? 'Событие сохранено' : 'Событие добавлено');
   },
   habit: (fd) => {
-    const o = { title: fd.get('title').trim(), emoji: fd.get('emoji') || '🎯' };
+    const o = { title: fd.get('title').trim(), emoji: fd.get('emoji') || '🎯', time: fd.get('time') || '', note: (fd.get('note') || '').trim() }; if (fd.has('remindTo')) o.remindTo = fd.get('remindTo');
     const id = fd.get('id');
     let it; if (id) it = Object.assign(find('habits', id), o); else S.habits.push(it = byMe({ id: uid(), done: {}, ...o }));
     closeSheet(); hap('ok'); commit(['put', 'habits', it]); toast(id ? 'Привычка сохранена' : 'Привычка добавлена');

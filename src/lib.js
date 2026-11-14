@@ -408,3 +408,25 @@ export function shortHash(str) {
   for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c, 2246822519) ^ (h2 >>> 13); }
   return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
 }
+
+/* ---------- Привычки по расписанию (приём добавок и т. п.) ---------- */
+// scope 'p' — личные привычки человека (напоминать, если remindTo задан),
+// scope 'f' — семейные (напоминать тому, чей id в remindTo, или всем при 'all')
+export function dueHabitReminders(st, tz, now, scope, uid, windowMin = 15) {
+  const out = [];
+  const { ymd: today } = partsIn(tz, new Date(now));
+  for (const h of st.habits || []) {
+    if (!h || !h.time || !/^\d{2}:\d{2}$/.test(h.time)) continue;
+    const to = h.remindTo == null ? '' : String(h.remindTo);
+    if (scope === 'p' ? !to : !(to === 'all' || to === String(uid))) continue;
+    if (h.done && h.done[today]) continue;
+    const at = zonedToMs(today, h.time, tz);
+    const cb = `hd:${scope}:${h.id}:${today.replace(/-/g, '')}`;
+    const body = `${h.emoji || '⏰'} <b>${escHtml(h.title)}</b> — ${h.time}${h.note ? '\n' + escHtml(h.note) : ''}`;
+    for (const [shift, pre, k] of [[0, '', 1], [60, 'Напоминаю ещё раз. ', 2]]) {
+      const t = at + shift * 60000;
+      if (t <= now && now - t < windowMin * 60000) out.push({ key: `${scope}:h:${h.id}:${today}:${k}`, text: pre + body, cb });
+    }
+  }
+  return out;
+}
