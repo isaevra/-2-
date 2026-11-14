@@ -12,39 +12,38 @@
 <style>
 /* ===== Темы: меняется только палитра ===== */
 :root,[data-theme=violet]{
+  color-scheme:dark;
   --ink:#0c0a1a; --glow:rgba(124,92,255,.30); --glow2:rgba(70,60,210,.16);
   --slab:rgba(30,26,60,.66); --slab-hi:rgba(44,38,84,.7); --slab2:#221e40; --line:rgba(180,160,255,.13);
   --tx:#f3f1fc; --mut:#9b95bf; --dim:#5f5a85;
   --acc:#8b6cff; --acc2:#bba8ff; --acc-ink:#fff; --acc-soft:rgba(139,108,255,.20); --acc-grad:linear-gradient(135deg,#9d84ff,#6d4df2);
   --sheet:#16132c; --tabbg:rgba(13,11,28,.86);
   --sky1:#3a2d7a; --sky2:#171334; --m1:#1d1840; --m2:#2d2563; --m3:#4b3f99;
-}
-[data-theme=man]{
-  --ink:#080c12; --glow:rgba(56,132,255,.24); --glow2:rgba(20,184,166,.10);
-  --slab:rgba(20,30,44,.70); --slab-hi:rgba(30,44,64,.72); --slab2:#18222f; --line:rgba(140,180,230,.13);
-  --tx:#eef3f9; --mut:#8c9bb0; --dim:#4e5d72;
-  --acc:#3d8bff; --acc2:#93c0ff; --acc-ink:#fff; --acc-soft:rgba(61,139,255,.20); --acc-grad:linear-gradient(135deg,#5aa2ff,#2160e0);
-  --sheet:#0f1722; --tabbg:rgba(8,12,18,.88);
-  --sky1:#1c3a66; --sky2:#0b1220; --m1:#0f1a2b; --m2:#182b45; --m3:#2b4c78;
+  --hero-tx:#fff; --hero-mut:rgba(255,255,255,.74); --ring-track:rgba(255,255,255,.14); --gear-bg:rgba(0,0,0,.22);
+  --green:#3ddc97; --amber:#ffbd4a; --red:#ff6b7a; --p1:#ff5f57; --p2:#ffa31a; --p3:#4c9bff;
+  --backdrop:rgba(0,0,0,.55); --shadow:inset 0 1px 0 rgba(255,255,255,.03);
 }
 [data-theme=woman]{
-  --ink:#14090f; --glow:rgba(255,92,168,.28); --glow2:rgba(186,104,255,.15);
-  --slab:rgba(50,22,42,.64); --slab-hi:rgba(70,30,58,.7); --slab2:#331729; --line:rgba(255,170,215,.15);
-  --tx:#fff1f7; --mut:#c49cb1; --dim:#7d566b;
-  --acc:#ff5fa8; --acc2:#ffb3d5; --acc-ink:#fff; --acc-soft:rgba(255,95,168,.20); --acc-grad:linear-gradient(135deg,#ff82bd,#e23d8a);
-  --sheet:#210f1b; --tabbg:rgba(20,9,15,.88);
-  --sky1:#7a2a62; --sky2:#220d1c; --m1:#2c1024; --m2:#4d1c40; --m3:#8a3470;
+  color-scheme:light;
+  --ink:#fff6f9; --glow:rgba(255,190,218,.55); --glow2:rgba(255,222,236,.7);
+  --slab:rgba(255,255,255,.86); --slab-hi:#ffffff; --slab2:#fdeef4; --line:rgba(214,120,160,.17);
+  --tx:#432536; --mut:#a37e91; --dim:#e2c3d2;
+  --acc:#ec82b0; --acc2:#d8649a; --acc-ink:#fff; --acc-soft:rgba(240,130,178,.16); --acc-grad:linear-gradient(135deg,#f8aacb,#e7779f);
+  --sheet:#fffafc; --tabbg:rgba(255,248,251,.92);
+  --sky1:#ffd3e4; --sky2:#fff2f7; --m1:#f2a7c6; --m2:#f6bfd6; --m3:#fbd6e5;
+  --hero-tx:#4a2639; --hero-mut:rgba(74,38,57,.62); --ring-track:rgba(216,100,154,.16); --gear-bg:rgba(255,255,255,.6);
+  --green:#2aa873; --red:#e0506a; --amber:#d8981c; --p1:#e5484d; --p2:#e5860f; --p3:#3d84e6;
+  --backdrop:rgba(120,60,90,.22); --shadow:0 6px 22px rgba(216,100,154,.10);
 }
 :root{
   --blue:var(--acc); --violet:var(--acc);
-  --green:#3ddc97; --amber:#ffbd4a; --red:#ff6b7a;
-  --p1:#ff5f57; --p2:#ffa31a; --p3:#4c9bff; --p4:var(--dim);
+  --p4:var(--dim);
   --r-card:20px; --r-sheet:26px;
   --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{background:var(--ink)}
-html,body{margin:0;color:var(--tx);color-scheme:dark}
+html,body{margin:0;color:var(--tx)}
 body{font:500 15px/1.45 Manrope,system-ui,sans-serif;min-height:100vh;overscroll-behavior:none;
   background:radial-gradient(110% 55% at 50% -12%,var(--glow),transparent 70%),radial-gradient(70% 40% at 105% 35%,var(--glow2),transparent 70%),var(--ink);background-attachment:fixed}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -71,24 +70,25 @@ button{cursor:pointer;border:0;background:none;padding:0}
 .hero .mtn{position:absolute;left:0;right:0;bottom:0;width:100%;height:96px;pointer-events:none}
 .mtn .m3{fill:var(--m3);opacity:.55}.mtn .m2{fill:var(--m2)}.mtn .m1{fill:var(--m1)}.mtn .snow{fill:#fff;opacity:.55}.mtn .st{fill:#fff}
 .hero>*:not(.mtn){position:relative}
-.hero .greet{color:rgba(255,255,255,.78);font-weight:600}
+.hero{color:var(--hero-tx)}
+.hero .greet{color:var(--hero-mut);font-weight:600}
 .hero .date{font:700 46px/1 Unbounded,sans-serif;letter-spacing:-.035em;margin:10px 0 4px}
-.hero .wd{font-weight:600;font-size:16px;color:rgba(255,255,255,.9)}
-.hero .hsub{font-size:13px;margin-top:44px;color:rgba(255,255,255,.72);font-weight:600}
-.hero .gear{position:absolute!important;z-index:2;top:14px;right:14px;background:rgba(0,0,0,.22);border-color:rgba(255,255,255,.14);color:#fff}
+.hero .wd{font-weight:600;font-size:16px}
+.hero .hsub{font-size:13px;margin-top:44px;color:var(--hero-mut);font-weight:600}
+.hero .gear{position:absolute!important;z-index:2;top:14px;right:14px;background:var(--gear-bg);border-color:var(--line);color:var(--hero-tx)}
 .dial{position:absolute!important;right:16px;bottom:22px;width:98px;height:98px}
 .dial svg{width:100%;height:100%;transform:rotate(-90deg)}
 .dial .val{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font:700 21px/1 Unbounded,sans-serif}
-.dial .val small{display:block;font:600 11px/1.2 Manrope;color:rgba(255,255,255,.7);margin-top:4px}
+.dial .val small{display:block;font:600 11px/1.2 Manrope;color:var(--hero-mut);margin-top:4px}
 
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.stat{background:var(--slab);border:1px solid var(--line);border-radius:18px;padding:12px;text-align:left}
+.stat{background:var(--slab);border:1px solid var(--line);border-radius:18px;padding:12px;text-align:left;box-shadow:var(--shadow)}
 .stat .si{display:block;width:20px;height:20px;color:var(--acc2);margin-bottom:8px}
 .stat .si svg{width:20px;height:20px}
 .stat b{display:block;font:700 18px/1.2 Unbounded,sans-serif;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat span{font-size:12.5px;color:var(--mut);font-weight:600}
 
-.card{background:var(--slab);border:1px solid var(--line);border-radius:var(--r-card);padding:14px 16px;margin-bottom:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.card{background:var(--slab);border:1px solid var(--line);border-radius:var(--r-card);padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
 .card h2{font:800 16px/1.2 Manrope,sans-serif;margin:0 0 8px;display:flex;align-items:center;gap:8px}
 .card h2 .mut{font-weight:600}
 .card h2 a{margin-left:auto;font-size:13px;color:var(--acc2);text-decoration:none;font-weight:700}
@@ -107,7 +107,7 @@ button{cursor:pointer;border:0;background:none;padding:0}
 .item.done .chk{background:var(--acc);border-color:var(--acc)}
 .item.done .chk svg{opacity:1;transform:none}
 .time{flex:none;min-width:56px;height:28px;border-radius:9px;background:var(--acc-soft);color:var(--acc2);font-weight:800;font-size:13px;display:grid;place-items:center;padding:0 7px}
-.time.hab{background:rgba(61,220,151,.14);color:#9ff0c8}
+.time.hab{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
 .prio{width:8px;height:8px;border-radius:50%;flex:none}
 .bell{width:15px;height:15px;color:var(--mut);vertical-align:-2px}
 
@@ -187,7 +187,7 @@ button{cursor:pointer;border:0;background:none;padding:0}
 .bal{font:700 34px/1.1 Unbounded,sans-serif;letter-spacing:-.02em}
 .bal.neg{color:var(--red)}
 .io{display:flex;gap:18px;margin-top:10px;font-weight:700;font-size:14px}
-.io .in{color:var(--green)} .io .out{color:#ff8f9a}
+.io .in{color:var(--green)} .io .out{color:var(--red)}
 .bars .b{margin:10px 0}
 .bars .bl{display:flex;justify-content:space-between;font-size:14px;font-weight:600;margin-bottom:6px}
 .bars .bt{height:8px;border-radius:5px;background:var(--slab2);overflow:hidden}
@@ -208,7 +208,7 @@ button{cursor:pointer;border:0;background:none;padding:0}
 
 /* шторка */
 .sheet-wrap{position:fixed;inset:0;z-index:50;pointer-events:none}
-.backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55);opacity:0;transition:opacity .22s}
+.backdrop{position:absolute;inset:0;background:var(--backdrop);opacity:0;transition:opacity .22s}
 .sheet{visibility:hidden;position:absolute;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;max-height:90vh;overflow:auto;background:var(--sheet);border-radius:var(--r-sheet) var(--r-sheet) 0 0;border:1px solid var(--line);border-bottom:0;
   padding:8px 18px calc(var(--safe-b) + 18px);transform:translateY(105%);transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s .28s}
 .sheet-wrap.open{pointer-events:auto}
@@ -328,7 +328,7 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .swatches input{position:absolute;opacity:0;pointer-events:none}
 .swatches span{display:block;width:34px;height:34px;border-radius:11px;border:3px solid transparent}
 .swatches input:checked+span{border-color:var(--tx)}
-.themes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.themes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
 .themeb{border-radius:16px;padding:10px;border:2px solid var(--line);background:var(--slab2);text-align:left;font-weight:700;font-size:13px}
 .themeb.on{border-color:var(--acc)}
 .themeb .sw3{display:flex;gap:4px;margin-bottom:8px}
@@ -336,6 +336,37 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .emptyart{text-align:center;padding:26px 10px 10px;color:var(--mut);font-weight:600}
 .emptyart svg{width:64px;height:64px;color:var(--acc);opacity:.85;margin-bottom:8px}
 
+/* ===== День по часам ===== */
+.dvhead{display:flex;align-items:center;gap:8px;margin:2px 0 4px}
+.dvback{display:inline-flex;align-items:center;gap:2px;color:var(--acc2);font-weight:700;font-size:16px;margin-left:-6px}
+.dvback svg{width:24px;height:24px}
+.dvtitle{font:700 21px/1.2 Unbounded,sans-serif;margin:2px 0 12px;letter-spacing:-.015em}
+.wstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:12px;background:var(--slab);border:1px solid var(--line);border-radius:18px;padding:8px 4px;box-shadow:var(--shadow)}
+.wsd{display:flex;flex-direction:column;align-items:center;gap:3px;padding:2px 0;font-weight:700}
+.wsd span{font-size:11.5px;color:var(--mut)}
+.wsd b{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:16px}
+.wsd.today b{color:var(--red)}
+.wsd.sel b{background:var(--acc-grad);color:#fff}
+.wsd.sel.today b{background:var(--red);color:#fff}
+.wsd i{width:5px;height:5px;border-radius:50%}
+.wsd i.on{background:var(--mut)}
+.allday{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px;padding:8px 10px;background:var(--slab);border:1px solid var(--line);border-radius:14px}
+.allday .mut{font-size:12px;font-weight:700;margin-right:2px}
+.adc{min-height:28px;padding:3px 10px;border-radius:8px;font-weight:700;font-size:13px;background:color-mix(in srgb,var(--bc) 20%,transparent);border-left:3px solid var(--bc);text-align:left}
+.tl{position:relative;margin:8px 0 16px;touch-action:pan-y}
+.hr{position:absolute;left:50px;right:0;border-top:1px solid var(--line)}
+.hl{position:absolute;left:-50px;top:-9px;width:42px;text-align:right;font-size:11.5px;font-weight:700;color:var(--mut)}
+.lane{position:absolute;left:54px;right:0;top:0;bottom:0}
+.slot{position:absolute;left:0;right:0;z-index:0;border-radius:8px}
+.slot:active{background:var(--acc-soft)}
+.blk{position:absolute;z-index:1;border-radius:9px;padding:4px 8px;text-align:left;overflow:hidden;background:color-mix(in srgb,var(--bc) 24%,var(--slab2));border-left:3px solid var(--bc);display:flex;flex-direction:column;gap:1px;color:var(--tx)}
+.blk b{font-size:13px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk span{font-size:11.5px;font-weight:600;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk.thin{justify-content:center;padding:0 8px}
+.blk.done{opacity:.5}.blk.done b{text-decoration:line-through}
+.nowl{position:absolute;left:50px;right:0;height:2px;background:var(--red);z-index:2;pointer-events:none}
+.nowl::before{content:'';position:absolute;left:-5px;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--red)}
+.nowl span{position:absolute;left:-50px;top:-8px;width:42px;text-align:right;font-size:11px;font-weight:800;color:var(--red)}
 .view{animation:vin .22s ease-out}
 @keyframes vin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -374,8 +405,8 @@ const hap = (k) => { try {
 } catch (e) {} };
 
 /* ============ Темы ============ */
-const THEMES = [['violet', 'Фиолетовая', ['#8b6cff', '#3a2d7a', '#16132c']], ['man', 'Мужская', ['#3d8bff', '#1c3a66', '#0f1722']], ['woman', 'Женская', ['#ff5fa8', '#7a2a62', '#210f1b']]];
-const INK = { violet: '#0c0a1a', man: '#080c12', woman: '#14090f' };
+const THEMES = [['violet', 'Фиолетовая', ['#8b6cff', '#3a2d7a', '#16132c']], ['woman', 'Нежная розовая', ['#f8aacb', '#ffd3e4', '#fff6f9']]];
+const INK = { violet: '#0c0a1a', woman: '#fff6f9' };
 function applyTheme(t) {
   if (!INK[t]) t = 'violet';
   document.documentElement.dataset.theme = t;
@@ -697,7 +728,7 @@ V.home = () => {
     <div class="wd">${WD[now.getDay()]}</div>
     <div class="hsub">${total ? `${openT} ${plural(openT, 'задача', 'задачи', 'задач')} · ${habTotal} ${plural(habTotal, 'привычка', 'привычки', 'привычек')}` : 'На сегодня пока пусто'}</div>
     <div class="dial" aria-label="Прогресс дня ${pct}%">
-      <svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="8"/>
+      <svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="none" style="stroke:var(--ring-track)" stroke-width="8"/>
       <circle cx="48" cy="48" r="40" fill="none" stroke="url(#g)" stroke-width="8" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct / 100)}" style="transition:stroke-dashoffset .6s"/>
       <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--acc2)"/><stop offset="1" style="stop-color:var(--acc)"/></linearGradient></defs></svg>
       <div class="val"><div>${pct}%<small>дня</small></div></div>
@@ -830,7 +861,7 @@ V.habits = () => {
       const last30 = Array.from({ length: 30 }, (_, i) => ymd(addDays(new Date(), -i))).filter(k => h.done[k]).length;
       return `<div class="habit">
         <button class="hn" data-act="editHabit" data-id="${h.id}"><span class="em">${h.emoji}</span>
-          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div>${h.time || h.note ? `<div class="st" style="color:#b9c3d6">${h.time ? '⏰ ' + h.time + (h.note ? ' · ' : '') : ''}${esc(h.note || '')}</div>` : ''}<div class="st">${s ? `<b>${s} ${plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / 30 * 100)}% за месяц</div></span></button>
+          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div>${h.time || h.note ? `<div class="st" style="color:var(--tx);opacity:.75">${h.time ? '⏰ ' + h.time + (h.note ? ' · ' : '') : ''}${esc(h.note || '')}</div>` : ''}<div class="st">${s ? `<b>${s} ${plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / 30 * 100)}% за месяц</div></span></button>
         <div class="hdots">${days.map(d => { const k = ymd(d); return `<div class="hd ${k === t ? 'today' : ''}"><button class="dot ${h.done[k] ? 'on' : ''} ${k === t ? 'today' : ''}" data-act="habit" data-id="${h.id}" data-day="${k}" aria-label="${esc(h.title)}, ${d.getDate()} ${MON_G[d.getMonth()]}" aria-pressed="${!!h.done[k]}"></button>${k === t ? 'сегодня' : WD_S[d.getDay()] + ' ' + d.getDate()}</div>`; }).join('')}</div>
       </div>`;
     }).join('')}`
@@ -929,9 +960,10 @@ const F = {
     <h3>${e.id ? 'Событие' : 'Новое событие'}</h3>
     <form data-form="event"><input type="hidden" name="id" value="${e.id || ''}">
       <label class="f"><span>Название</span><input class="inp" name="title" required maxlength="200" value="${esc(e.title || '')}" placeholder="Например, встреча с клиентом"></label>
+      <label class="f"><span>Дата</span><input class="inp" type="date" name="date" required value="${e.date || UI.selDay}"></label>
       <div class="two">
-        <label class="f"><span>Дата</span><input class="inp" type="date" name="date" required value="${e.date || UI.selDay}"></label>
-        <label class="f"><span>Время</span><input class="inp" type="time" name="time" value="${e.time || ''}"></label>
+        <label class="f"><span>Начало</span><input class="inp" type="time" name="time" value="${e.time || ''}"></label>
+        <label class="f"><span>Конец</span><input class="inp" type="time" name="end" value="${e.end || ''}"></label>
       </div>
       <label class="f"><span>Напомнить</span><select class="inp" name="remind">${REMIND.map(([v, l]) => `<option value="${v}" ${String(e.remind ?? '60') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <p class="hint">${MODE === 'server' ? 'Напоминание придёт сообщением от бота.' : 'Напоминания от бота работают, когда приложение открыто через бота.'}</p>
@@ -1033,7 +1065,6 @@ const A = {
   editTask: (d) => openSheet(F.task(find('tasks', d.id))),
   toggleTask: (d) => { const t = find('tasks', d.id); t.done = !t.done; hap(t.done ? 'ok' : 'light'); commit(['put', 'tasks', t]); },
   delTask: (d) => removeWithUndo('tasks', d.id, 'Задача удалена'),
-  newEvent: () => openSheet(F.event()),
   editEvent: (d) => {
     const e = find('events', d.id); if (!e) return;
     if (e.src !== 'cal') return openSheet(F.event(e));
@@ -1228,6 +1259,7 @@ const FORMS = {
   },
   event: (fd) => {
     const o = { title: fd.get('title').trim(), date: fd.get('date'), time: fd.get('time') || '', remind: fd.get('remind'), note: (fd.get('note') || '').trim() };
+    o.end = o.time && fd.get('end') && fd.get('end') > o.time ? fd.get('end') : '';
     const id = fd.get('id');
     let it; if (id) it = Object.assign(find('events', id), o); else S.events.push(it = byMe({ id: uid(), ...o }));
     closeSheet(); hap('ok'); commit(['put', 'events', it]); toast(id ? 'Событие сохранено' : 'Событие добавлено');
@@ -1525,11 +1557,11 @@ function planUpcoming() {
   const pm = UI.planMonth, y = pm.getFullYear(), m = pm.getMonth();
   const off = (new Date(y, m, 1).getDay() + 6) % 7, dim = new Date(y, m + 1, 0).getDate(), T = today();
   let cells = '';
-  for (let i = 0; i < off; i++) { const d = new Date(y, m, i - off + 1); cells += `<button class="day out" data-act="selDay" data-day="${ymd(d)}">${d.getDate()}<span class="dots"></span></button>`; }
+  for (let i = 0; i < off; i++) { const d = new Date(y, m, i - off + 1); cells += `<button class="day out" data-act="openDay" data-day="${ymd(d)}">${d.getDate()}<span class="dots"></span></button>`; }
   for (let i = 1; i <= dim; i++) {
     const k = `${y}-${pad(m + 1)}-${pad(i)}`;
     const ne = S.events.some(e => e.date === k), nt = S.tasks.some(x => x.date === k && !x.done);
-    cells += `<button class="day ${k === T ? 'today' : ''} ${k === UI.selDay ? 'sel' : ''}" data-act="selDay" data-day="${k}" aria-label="${i} ${MON_G[m]}">${i}<span class="dots">${ne ? '<i></i>' : ''}${nt ? '<i class="tk"></i>' : ''}</span></button>`;
+    cells += `<button class="day ${k === T ? 'today' : ''} ${k === UI.selDay ? 'sel' : ''}" data-act="openDay" data-day="${k}" aria-label="${i} ${MON_G[m]}">${i}<span class="dots">${ne ? '<i></i>' : ''}${nt ? '<i class="tk"></i>' : ''}</span></button>`;
   }
   const dayBlock = (d, withAdd) => {
     const ev = S.events.filter(e => e.date === d), tk = S.tasks.filter(x => x.date === d && !x.done);
@@ -1755,6 +1787,89 @@ document.addEventListener('keydown', (e) => {
     persist([['put', 'tasks', t]]); el.value = ''; $('#subs').innerHTML = subsHtml(t); render();
   }
 });
+
+/* ---------- День по часам, как в Календаре iPhone ---------- */
+const HOUR_H = 56;
+const hmToMin = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+function dayItems(d) {
+  const items = [], allDay = [];
+  for (const e of S.events) if (e.date === d) {
+    if (!e.time) { allDay.push({ kind: 'event', id: e.id, title: e.title, color: 'var(--acc)' }); continue; }
+    const s0 = hmToMin(e.time); let e0 = e.end ? hmToMin(e.end) : s0 + 60; if (e0 <= s0) e0 = Math.min(s0 + 60, 1440);
+    items.push({ kind: 'event', id: e.id, title: e.title, sub: [e.time + (e.end ? '–' + e.end : ''), e.note, e.src === 'cal' ? (SCOPE === 'family' && e.by ? e.by + ', ' : '') + (e.calName || '') : ''].filter(Boolean).join(' · '), s: s0, e: e0, color: 'var(--acc)' });
+  }
+  for (const t of S.tasks) if (t.date === d) {
+    if (!t.time) { if (!t.done) allDay.push({ kind: 'task', id: t.id, title: t.title, color: PR(t) === 4 ? 'var(--mut)' : `var(--p${PR(t)})` }); continue; }
+    const s0 = hmToMin(t.time);
+    items.push({ kind: 'task', id: t.id, title: t.title, sub: t.time + (projById(t.proj) ? ' · ' + projById(t.proj).name : ''), s: s0, e: Math.min(s0 + 30, 1440), color: PR(t) === 4 ? 'var(--acc2)' : `var(--p${PR(t)})`, done: t.done });
+  }
+  const habs = (S.habits || []).filter(h => h.time).map(h => ({ h, sc: SCOPE }));
+  if (MODE === 'server' && SCOPE === 'personal') { const me = String(SRV.me.id); for (const h of SRV.family.habits || []) if (h.time && (String(h.remindTo) === me || h.remindTo === 'all')) habs.push({ h, sc: 'family' }); }
+  for (const { h, sc } of habs) { const s0 = hmToMin(h.time); items.push({ kind: 'habit', id: h.id, sc, title: (h.emoji ? h.emoji + ' ' : '') + h.title, sub: h.time + (h.note ? ' · ' + h.note : ''), s: s0, e: Math.min(s0 + 30, 1440), color: 'var(--green)', done: !!(h.done && h.done[d]) }); }
+  items.sort((a, b) => a.s - b.s || b.e - a.e);
+  let cluster = [], end = -1;
+  const finish = () => { const cols = []; for (const it of cluster) { let c = cols.findIndex(x => x <= it.s); if (c < 0) { c = cols.length; cols.push(0); } cols[c] = it.e; it.col = c; } cluster.forEach(it => { it.ncol = cols.length; }); cluster = []; };
+  for (const it of items) { if (cluster.length && it.s >= end) { finish(); end = -1; } cluster.push(it); end = Math.max(end, it.e); }
+  if (cluster.length) finish();
+  return { items, allDay };
+}
+function planDay(d) {
+  const D = parseYmd(d), T = today();
+  const wk0 = ymdAdd(d, -((D.getDay() + 6) % 7));
+  const strip = Array.from({ length: 7 }, (_, i) => {
+    const x = ymdAdd(wk0, i), X = parseYmd(x);
+    const has = S.events.some(e => e.date === x) || S.tasks.some(t => t.date === x && !t.done);
+    return `<button class="wsd ${x === d ? 'sel' : ''} ${x === T ? 'today' : ''}" data-act="openDay" data-day="${x}" aria-label="${X.getDate()} ${MON_G[X.getMonth()]}"><span>${WD_S[X.getDay()]}</span><b>${X.getDate()}</b><i class="${has ? 'on' : ''}"></i></button>`;
+  }).join('');
+  const { items, allDay } = dayItems(d);
+  const nowMin = d === T ? new Date().getHours() * 60 + new Date().getMinutes() : -999;
+  let hours = '', slots = '';
+  for (let h = 0; h < 24; h++) {
+    hours += `<div class="hr" style="top:${h * HOUR_H}px"><span class="hl">${h && Math.abs(h * 60 - nowMin) > 14 ? pad(h) + ':00' : ''}</span></div>`;
+    slots += `<button class="slot" style="top:${h * HOUR_H}px;height:${HOUR_H}px" data-act="slot" data-h="${h}" aria-label="Новое событие в ${pad(h)}:00"></button>`;
+  }
+  const blocks = items.map(it => {
+    const top = it.s / 60 * HOUR_H + 1, hgt = Math.max((it.e - it.s) / 60 * HOUR_H - 3, 22), w = 100 / it.ncol;
+    const act = it.kind === 'event' ? 'editEvent' : it.kind === 'task' ? 'editTask' : 'habitAt';
+    return `<button class="blk ${it.done ? 'done' : ''} ${hgt < 36 ? 'thin' : ''}" style="--bc:${it.color};top:${top}px;height:${hgt}px;left:calc(${it.col * w}% + 1px);width:calc(${w}% - 3px)" data-act="${act}" data-id="${it.id}" ${it.kind === 'habit' ? `data-sc="${it.sc}" data-day="${d}"` : ''}>
+      <b>${esc(it.title)}</b>${it.sub && hgt >= 36 ? `<span>${esc(it.sub)}</span>` : ''}</button>`;
+  }).join('');
+  let now = '';
+  if (d === T) { const n = new Date(), m = n.getHours() * 60 + n.getMinutes(); now = `<div class="nowl" style="top:${m / 60 * HOUR_H}px"><span>${pad(n.getHours())}:${pad(n.getMinutes())}</span></div>`; }
+  const title = `${WD[D.getDay()]}, ${D.getDate()} ${MON_G[D.getMonth()]}${D.getFullYear() !== new Date().getFullYear() ? ' ' + D.getFullYear() : ''}`;
+  return `
+  <div class="dvhead"><button class="dvback" data-act="closeDay">${I.left}${MON[D.getMonth()].charAt(0).toUpperCase() + MON[D.getMonth()].slice(1)}</button><span class="sp"></span>
+    ${d !== T ? `<button class="chip" data-act="openDay" data-day="${T}">Сегодня</button>` : ''}
+    <button class="iconbtn" data-act="newEvent" data-date="${d}" aria-label="Новое событие">${I.plus}</button></div>
+  <div class="dvtitle">${title.charAt(0).toUpperCase() + title.slice(1)}</div>
+  <div class="wstrip">${strip}</div>
+  ${allDay.length ? `<div class="allday"><span class="mut">весь день</span>${allDay.map(a => `<button class="adc" style="--bc:${a.color}" data-act="${a.kind === 'event' ? 'editEvent' : 'editTask'}" data-id="${a.id}">${esc(a.title)}</button>`).join('')}</div>` : ''}
+  <div class="tl" id="tl" style="height:${24 * HOUR_H}px">${hours}<div class="lane">${slots}${blocks}</div>${now}</div>`;
+}
+function scrollDay(d) {
+  const tl = $('#tl'); if (!tl) return;
+  const { items } = dayItems(d);
+  const m = Math.max(0, d === today() ? new Date().getHours() * 60 - 90 : items.length ? items[0].s - 60 : 8 * 60);
+  window.scrollTo({ top: tl.getBoundingClientRect().top + window.scrollY + m / 60 * HOUR_H - 140, behavior: 'instant' });
+}
+const _planView = V.plan;
+V.plan = () => UI.dayView ? planDay(UI.dayView) : _planView();
+Object.assign(A, {
+  openDay: (d) => {
+    UI.dayView = d.day; UI.selDay = d.day; const s = parseYmd(d.day); UI.planMonth = new Date(s.getFullYear(), s.getMonth(), 1);
+    hap('sel'); if (UI.view !== 'plan') go('plan'); else render(); setTimeout(() => scrollDay(d.day), 0);
+  },
+  closeDay: () => { UI.dayView = ''; UI.ptab = 'upcoming'; render(); window.scrollTo(0, 0); },
+  slot: (d) => { const h = +d.h; openSheet(F.event({ date: UI.dayView, time: pad(h) + ':00', end: pad(Math.min(h + 1, 23)) + ':' + (h === 23 ? '59' : '00') })); },
+  newEvent: (d = {}) => openSheet(F.event(d.date ? { date: d.date } : {}))
+});
+let swX = null, swY = 0;
+document.addEventListener('touchstart', (e) => { if (UI.view === 'plan' && UI.dayView && e.target.closest('#tl, .dvtitle, .allday')) { swX = e.touches[0].clientX; swY = e.touches[0].clientY; } else swX = null; }, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (swX == null) return;
+  const dx = e.changedTouches[0].clientX - swX, dy = e.changedTouches[0].clientY - swY; swX = null;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) A.openDay({ day: ymdAdd(UI.dayView, dx < 0 ? 1 : -1) });
+}, { passive: true });
 
 /* ============ События ============ */
 document.addEventListener('click', (e) => {
