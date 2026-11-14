@@ -1,9 +1,9 @@
 // Чистые функции без зависимостей от Cloudflare — их удобно тестировать.
 
 export const DEF_TZ = 'Asia/Vladivostok';
-export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop'];
+export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop', 'projects'];
 
-export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [] });
+export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [], projects: [] });
 
 /* ---------- Проверка подписи Telegram Mini App (initData) ---------- */
 const enc = new TextEncoder();
@@ -173,10 +173,11 @@ export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid }) {
     if (t.done) continue;
     if (t.date === ymd) tk.push({ mark, ...t }); else if (t.date && t.date < ymd) od.push({ mark, ...t });
   }
-  tk.sort((a, b) => (b.prio || 0) - (a.prio || 0) || (a.time || '99').localeCompare(b.time || '99'));
+  const pr = (t) => t.p || (t.prio === 2 ? 1 : t.prio === 1 ? 2 : 4);
+  tk.sort((a, b) => pr(a) - pr(b) || (a.time || '99').localeCompare(b.time || '99'));
   if (tk.length) {
     L.push('', `✅ <b>Дела на сегодня</b> (${tk.length})`);
-    tk.slice(0, 12).forEach(t => L.push(`• ${t.mark}${t.time ? t.time + ' ' : ''}${escHtml(t.title)}${t.prio === 2 ? ' ‼️' : t.prio === 1 ? ' ❗' : ''}`));
+    tk.slice(0, 12).forEach(t => L.push(`• ${t.mark}${t.time ? t.time + ' ' : ''}${escHtml(t.title)}${pr(t) === 1 ? ' ‼️' : pr(t) === 2 ? ' ❗' : ''}`));
     if (tk.length > 12) L.push(`…и ещё ${tk.length - 12}`);
   }
   if (od.length) L.push('', `⚠️ <b>Просрочено</b>: ${od.slice(0, 5).map(t => t.mark + escHtml(t.title)).join(', ')}${od.length > 5 ? ` и ещё ${od.length - 5}` : ''}`);

@@ -71,7 +71,7 @@ export class Store extends DurableObject {
     }
     const me = meta.users[user.id];
     const members = () => Object.values(meta.users).map(u => ({ id: u.id, name: u.name }));
-    const pub = () => ({ id: me.id, name: me.name, isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
+    const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
 
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
@@ -90,6 +90,7 @@ export class Store extends DurableObject {
         me.digest = body.digest;
       }
       if (typeof body.digestOn === 'boolean') me.digestOn = body.digestOn;
+      if (['violet', 'man', 'woman'].includes(body.theme)) me.theme = body.theme;
       if (typeof body.name === 'string' && body.name.trim()) me.name = body.name.trim().slice(0, 40);
       await this.putMeta(meta);
       return { ok: true, me: pub() };
