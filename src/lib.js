@@ -1,9 +1,9 @@
 // Чистые функции без зависимостей от Cloudflare — их удобно тестировать.
 
 export const DEF_TZ = 'Asia/Vladivostok';
-export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop', 'projects'];
+export const COLS = ['thoughts', 'habits', 'money', 'tasks', 'events', 'shop', 'projects', 'cats'];
 
-export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [], projects: [] });
+export const emptyState = () => ({ v: 1, name: '', currency: '₽', thoughts: [], habits: [], money: [], tasks: [], events: [], shop: [], projects: [], cats: [] });
 
 /* ---------- Проверка подписи Telegram Mini App (initData) ---------- */
 const enc = new TextEncoder();
@@ -428,6 +428,103 @@ export function dueHabitReminders(st, tz, now, scope, uid, windowMin = 15) {
       const t = at + shift * 60000;
       if (t <= now && now - t < windowMin * 60000) out.push({ key: `${scope}:h:${h.id}:${today}:${k}`, text: pre + body, cb });
     }
+  }
+  return out;
+}
+
+/* ---------- Финансы: категории, лимиты, отчёты ---------- */
+// Категория операции: по имени или по старому имени (после переименования)
+export const catOf = (cats, type, name) => (cats || []).find(c => c.type === type && (c.name === name || (c.alias || []).includes(name))) || null;
+const catTitle = (cats, type, name) => { const c = catOf(cats, type, name); return c ? c.name : (name || 'Без категории'); };
+const rub = (n, cur) => Math.round(n).toLocaleString('ru-RU').replace(/[\u00a0\u202f]/g, ' ') + ' ' + (cur || '₽');
+const MON_P = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
+const MON_N = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+export function spendSummary(st, from, to) {
+  const cats = st.cats || [], by = {}, big = [];
+  let inc = 0, out = 0;
+  for (const o of st.money || []) {
+    if (!o.date || o.date < from || o.date > to) continue;
+    const a = Number(o.amount) || 0;
+    if (o.type === 'in') { inc += a; continue; }
+    out += a;
+    const n = catTitle(cats, 'out', o.cat);
+    by[n] = (by[n] || 0) + a;
+    big.push({ ...o, catName: n, a });
+  }
+  return { inc, out, by: Object.entries(by).sort((x, y) => y[1] - x[1]), big: big.sort((x, y) => y.a - x.a).slice(0, 3) };
+}
+// Расход по категориям с лимитом за месяц mk
+export function limitStatus(st, mk) {
+  const cats = (st.cats || []).filter(c => c.type === 'out' && Number(c.limit) > 0);
+  if (!cats.length) return [];
+  const s = spendSummary(st, mk + '-01', mk + '-31');
+  const spent = Object.fromEntries(s.by);
+  return cats.map(c => ({ id: c.id, name: c.name, limit: Number(c.limit), spent: spent[c.name] || 0 })).sort((a, b) => b.spent / b.limit - a.spent / a.limit);
+}
+const pctDiff = (a, b) => b > 0 ? Math.round((a - b) / b * 100) : null;
+const rangeLabel = (from, to) => {
+  const [, m1, d1] = from.split('-').map(Number), [, m2, d2] = to.split('-').map(Number);
+  return m1 === m2 ? `${d1}–${d2} ${MON_G[m2 - 1]}` : `${d1} ${MON_G[m1 - 1]} – ${d2} ${MON_G[m2 - 1]}`;
+};
+function limitLines(st, mk, cur) {
+  return limitStatus(st, mk).map(l => {
+    const left = l.limit - l.spent;
+    return `• ${escHtml(l.name)} — ${rub(l.spent, cur)} из ${rub(l.limit, cur)}${left >= 0 ? `, осталось ${rub(left, cur)}` : ` 🔴 перерасход ${rub(-left, cur)}`}`;
+  });
+}
+export function weeklyReport(st, today, cur) {
+  const from = shiftYmd(today, -6), pFrom = shiftYmd(today, -13), pTo = shiftYmd(today, -7);
+  const a = spendSummary(st, from, today), p = spendSummary(st, pFrom, pTo);
+  const L = [`📊 <b>Траты за неделю</b> · ${rangeLabel(from, today)}`];
+  if (!a.out && !a.inc) return L.concat('', 'За эту неделю операций не было.').join('\n');
+  const d = pctDiff(a.out, p.out);
+  L.push('', `Потрачено: <b>${rub(a.out, cur)}</b>${d === null ? '' : d === 0 ? ' (как неделей раньше)' : ` (${d > 0 ? 'на ' + d + '% больше' : 'на ' + -d + '% меньше'}, чем неделей раньше)`}`);
+  if (a.inc) L.push(`Доходы: +${rub(a.inc, cur)}`);
+  if (a.by.length) { L.push('', '<b>Основные траты</b>'); a.by.slice(0, 5).forEach(([n, v]) => L.push(`• ${escHtml(n)} — ${rub(v, cur)} (${Math.round(v / a.out * 100)}%)`)); }
+  if (a.big.length) { L.push('', '<b>Крупные покупки</b>'); a.big.forEach(o => L.push(`• ${rub(o.a, cur)} — ${escHtml(o.catName)}${o.note ? ', ' + escHtml(o.note) : ''}`)); }
+  const lim = limitLines(st, today.slice(0, 7), cur);
+  if (lim.length) L.push('', `<b>Лимиты на ${MON_N[Number(today.slice(5, 7)) - 1]}</b>`, ...lim);
+  return L.join('\n');
+}
+export function monthlyReport(st, mk, cur) {
+  const [y, m] = mk.split('-').map(Number);
+  const pm = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+  const a = spendSummary(st, mk + '-01', mk + '-31'), p = spendSummary(st, pm + '-01', pm + '-31');
+  const L = [`🗓 <b>Итоги месяца: ${MON_N[m - 1]}</b>`];
+  if (!a.out && !a.inc) return L.concat('', `В ${MON_P[m - 1]} операций не было.`).join('\n');
+  const bal = a.inc - a.out, d = pctDiff(a.out, p.out);
+  L.push('', `Доходы: +${rub(a.inc, cur)}`, `Расходы: −${rub(a.out, cur)}${d === null ? '' : ` (${d >= 0 ? '+' : '−'}${Math.abs(d)}% к прошлому месяцу)`}`, `Остаток: <b>${bal < 0 ? '−' : ''}${rub(Math.abs(bal), cur)}</b>`);
+  if (a.by.length) {
+    const prev = Object.fromEntries(p.by);
+    L.push('', '<b>По категориям</b>');
+    a.by.slice(0, 12).forEach(([n, v]) => { const dd = pctDiff(v, prev[n] || 0); L.push(`• ${escHtml(n)} — ${rub(v, cur)} (${Math.round(v / a.out * 100)}%)${dd !== null && Math.abs(dd) >= 15 ? ` ${dd > 0 ? '↑' : '↓'}${Math.abs(dd)}%` : ''}`); });
+    if (a.by.length > 12) L.push(`…и ещё ${a.by.length - 12}`);
+  }
+  if (a.big.length) { L.push('', '<b>Самые крупные траты</b>'); a.big.forEach(o => L.push(`• ${rub(o.a, cur)} — ${escHtml(o.catName)}${o.note ? ', ' + escHtml(o.note) : ''}`)); }
+  const lim = limitLines(st, mk, cur);
+  if (lim.length) L.push('', '<b>Лимиты</b>', ...lim);
+  return L.join('\n');
+}
+// Когда пора: пятница 21:00 / последний день месяца 21:00 (в течение 3 часов)
+export function reportsDue(user, tz, now) {
+  const { ymd, hm } = partsIn(tz, new Date(now));
+  const out = [];
+  if (hm < '21:00') return out;
+  const [y, m, d] = ymd.split('-').map(Number);
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (wd === 5 && user.repWeek !== false && user.lastWeek !== ymd) out.push({ kind: 'week', ymd });
+  if (shiftYmd(ymd, 1).endsWith('-01') && user.repMonth !== false && user.lastMonth !== ymd.slice(0, 7)) out.push({ kind: 'month', ymd });
+  return out;
+}
+// Предупреждения: 80% и 100% лимита, по одному разу за месяц
+export function limitAlerts(st, mk, sentMap, cur) {
+  const out = [];
+  for (const l of limitStatus(st, mk)) {
+    const r = l.spent / l.limit, prev = sentMap[l.id] || 0;
+    const th = r >= 1 ? 100 : r >= 0.8 ? 80 : 0;
+    if (th > prev) out.push({ id: l.id, th, text: th === 100
+      ? `🔴 <b>Лимит превышен: ${escHtml(l.name)}</b>\nПотрачено ${rub(l.spent, cur)} из ${rub(l.limit, cur)} — перерасход ${rub(l.spent - l.limit, cur)}.`
+      : `⚠️ <b>${escHtml(l.name)}: ${Math.round(r * 100)}% лимита</b>\nПотрачено ${rub(l.spent, cur)} из ${rub(l.limit, cur)}, осталось ${rub(l.limit - l.spent, cur)} до конца месяца.` });
   }
   return out;
 }

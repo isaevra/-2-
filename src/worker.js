@@ -5,7 +5,8 @@ import {
   DEF_TZ, emptyState, applyOps, checkInitData, webhookSecret, validTz,
   dueReminders, buildDigest, digestDue, escHtml,
   ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE,
-  parseIcs, expandIcs, shortHash, shiftYmd, dueHabitReminders
+  parseIcs, expandIcs, shortHash, shiftYmd, dueHabitReminders,
+  weeklyReport, monthlyReport, reportsDue, limitAlerts
 } from './lib.js';
 const HOOK_VER = 2; // вебхук принимает нажатия кнопок
 
@@ -15,10 +16,12 @@ const CAL_REMIND = ['', '0', '15', '30', '60', '180', '1440'];
 const COMMANDS = [
   { command: 'today', description: 'Сводка на сегодня' },
   { command: 'shop', description: 'Список покупок' },
+  { command: 'week', description: 'Траты за неделю' },
+  { command: 'month', description: 'Итоги месяца' },
   { command: 'invite', description: 'Пригласить в семью' },
   { command: 'help', description: 'Что умеет бот' }
 ];
-const CMD_VER = 2;
+const CMD_VER = 3;
 
 const ZEN_EVERY = 30 * 60e3; // как часто обновлять Дзен-мани
 
@@ -71,7 +74,7 @@ export class Store extends DurableObject {
     }
     const me = meta.users[user.id];
     const members = () => Object.values(meta.users).map(u => ({ id: u.id, name: u.name }));
-    const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
+    const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', repWeek: me.repWeek !== false, repMonth: me.repMonth !== false, isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
 
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
@@ -91,6 +94,8 @@ export class Store extends DurableObject {
       }
       if (typeof body.digestOn === 'boolean') me.digestOn = body.digestOn;
       if (['violet', 'man', 'woman'].includes(body.theme)) me.theme = body.theme;
+      if (typeof body.repWeek === 'boolean') me.repWeek = body.repWeek;
+      if (typeof body.repMonth === 'boolean') me.repMonth = body.repMonth;
       if (typeof body.name === 'string' && body.name.trim()) me.name = body.name.trim().slice(0, 40);
       await this.putMeta(meta);
       return { ok: true, me: pub() };
@@ -99,6 +104,11 @@ export class Store extends DurableObject {
       if (!me.started) return { ok: false, error: 'not_started' };
       const r = await this.sendDigest(meta, me, Date.now());
       return { ok: !!(r && r.ok), error: r && r.ok ? undefined : 'send_failed' };
+    }
+    if (action === 'report') {
+      if (!me.started) return { ok: false, error: 'not_started' };
+      const r = await this.sendReport(me, body.kind === 'month' ? 'month' : 'week', Date.now());
+      return { ok: !!(r && r.ok) };
     }
     if (action === 'invite') {
       if (meta.owner !== me.id) return { status: 403, error: 'owner_only' };
@@ -317,6 +327,7 @@ export class Store extends DurableObject {
       if (!r.ok) return this.send(from.id, 'Не получилось создать приглашение, попробуй ещё раз.');
       return this.send(from.id, `Перешли эту ссылку тому, кого хочешь добавить в семью. Она одноразовая и действует 7 дней:\n${r.link}`);
     }
+    if (text === '/week' || text === '/month') return this.sendReport(me, text === '/month' ? 'month' : 'week', Date.now());
     if (text === '/shop' || /^список( покупок)?$/i.test(text)) {
       const list = ((await this.data('family')).shop || []).filter(x => !x.done);
       return this.send(from.id, list.length ? `🛒 <b>Купить</b> (${list.length}):\n` + list.map(x => '• ' + escHtml(x.text)).join('\n') : '🛒 Список покупок пуст. Напиши «купить молоко, хлеб», и я добавлю.', { reply_markup: this.openBtn(meta, 'Открыть список') });
@@ -364,6 +375,16 @@ export class Store extends DurableObject {
     }
   }
 
+  async sendReport(me, kind, now) {
+    const pers = await this.data('u:' + me.id), fam = await this.data('family');
+    const tz = me.tz || DEF_TZ, ymd = partsIn(tz, new Date(now)).ymd;
+    const make = (st) => kind === 'month' ? monthlyReport(st, ymd.slice(0, 7), pers.currency || '₽') : weeklyReport(st, ymd, pers.currency || '₽');
+    let text = make(pers);
+    const famHas = (fam.money || []).some(o => o.date && o.date >= shiftYmd(ymd, kind === 'month' ? -31 : -7));
+    if (famHas) text += '\n\n👨‍👩‍👧 <b>Семейный бюджет</b>\n' + make(fam).split('\n').slice(1).join('\n').replace(/^\n/, '');
+    return this.send(me.id, text, { reply_markup: this.openBtn(await this.meta(), 'Открыть финансы') });
+  }
+
   async sendDigest(meta, me, now, manual = false) {
     const pers = await this.data('u:' + me.id);
     const fam = await this.data('family');
@@ -404,6 +425,18 @@ export class Store extends DurableObject {
       if (!zenDone) {
         const z = await this.ctx.storage.get('zen:' + u.id);
         if (z && z.token && z.error !== 'token' && now - (z.lastSync || 0) > ZEN_EVERY) { zenDone = true; await this.zenSync(u); }
+      }
+      for (const r of reportsDue(u, tz, now)) {
+        if (r.kind === 'week') u.lastWeek = r.ymd; else u.lastMonth = r.ymd.slice(0, 7);
+        const res = await this.sendReport(u, r.kind, now); if (res && res.ok) sent++;
+      }
+      {
+        const mk = partsIn(tz, new Date(now)).ymd.slice(0, 7);
+        if (!u.lim || u.lim.mk !== mk) u.lim = { mk, sent: {} };
+        for (const al of limitAlerts(pers, mk, u.lim.sent, pers.currency || '₽')) {
+          u.lim.sent[al.id] = al.th;
+          const res = await this.send(u.id, al.text, { reply_markup: this.openBtn(meta, 'Открыть финансы') }); if (res && res.ok) sent++;
+        }
       }
       const day = digestDue(u, tz, now);
       if (day) {
