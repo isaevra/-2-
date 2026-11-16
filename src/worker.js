@@ -73,13 +73,14 @@ export class Store extends DurableObject {
       this.addUser(meta, user);
     }
     const me = meta.users[user.id];
-    const members = () => Object.values(meta.users).map(u => ({ id: u.id, name: u.name }));
+    const members = () => Object.values(meta.users).map(u => ({ id: u.id, name: u.name, started: !!u.started }));
+    const myNotes = () => (meta.notes || []).filter(n => n.from === me.id).map(n => ({ id: n.id, to: n.to, text: n.text, at: n.at }));
     const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', repWeek: me.repWeek !== false, repMonth: me.repMonth !== false, isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
 
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
       await this.putMeta(meta);
-      return { ok: true, me: pub(), members: members(), bot: meta.bot, zen: await this.zenStatus(me.id), cal: await this.calStatus(me.id), personal: await this.data('u:' + me.id), family: await this.data('family') };
+      return { ok: true, me: pub(), members: members(), bot: meta.bot, notes: myNotes(), zen: await this.zenStatus(me.id), cal: await this.calStatus(me.id), personal: await this.data('u:' + me.id), family: await this.data('family') };
     }
     if (action === 'ops') {
       const key = body.scope === 'family' ? 'family' : 'u:' + me.id;
@@ -99,6 +100,31 @@ export class Store extends DurableObject {
       if (typeof body.name === 'string' && body.name.trim()) me.name = body.name.trim().slice(0, 40);
       await this.putMeta(meta);
       return { ok: true, me: pub() };
+    }
+    // Разовое уведомление члену семьи: сейчас или в назначенное время
+    if (action === 'notify') {
+      const text = String(body.text || '').trim().slice(0, 1000);
+      if (!text) return { ok: false, error: 'empty' };
+      const others = Object.values(meta.users).filter(u => u.id !== me.id);
+      const to = body.to === 'all' ? 'all' : Number(body.to);
+      if (to !== 'all' && !meta.users[to]) return { ok: false, error: 'no_member' };
+      const at = Number(body.at) || 0;
+      if (at > Date.now() + 60000) {
+        meta.notes = (meta.notes || []).filter(n => n.at > Date.now() - 86400000);
+        if (meta.notes.filter(n => n.from === me.id).length >= 30) return { ok: false, error: 'too_many' };
+        meta.notes.push({ id: Math.random().toString(36).slice(2, 10), from: me.id, to, text, at: Math.min(at, Date.now() + 366 * 86400000) });
+        await this.putMeta(meta);
+        return { ok: true, scheduled: true, notes: myNotes() };
+      }
+      const list = to === 'all' ? others : [meta.users[to]];
+      let sent = 0; const missed = [];
+      for (const u of list) { const r = u.started ? await this.sendNote(me, u, text) : null; if (r && r.ok) sent++; else missed.push(u.name); }
+      return { ok: sent > 0, sent, missed, notes: myNotes() };
+    }
+    if (action === 'noteDel') {
+      meta.notes = (meta.notes || []).filter(n => !(n.id === body.id && n.from === me.id));
+      await this.putMeta(meta);
+      return { ok: true, notes: myNotes() };
     }
     if (action === 'digest') {
       if (!me.started) return { ok: false, error: 'not_started' };
@@ -352,11 +378,24 @@ export class Store extends DurableObject {
     return this.send(from.id, 'Пока понимаю только текст. Фото и голосовые научусь сохранять позже.');
   }
 
-  // Нажатие «✅ Готово» под напоминанием о привычке
+  sendNote(from, to, text) {
+    return this.send(to.id, `💌 <b>${escHtml(from.name || 'Семья')}</b> передаёт:\n\n${escHtml(text)}`, { reply_markup: { inline_keyboard: [[{ text: '❤️', callback_data: 'nr:' + from.id }]] } });
+  }
+
+  // Нажатие «✅ Готово» под напоминанием о привычке / ❤️ под сообщением
   async onButton(cq) {
     const meta = await this.meta();
     const answer = (text) => tg(this.env, 'answerCallbackQuery', { callback_query_id: cq.id, text });
     const me = meta.users[cq.from && cq.from.id];
+    const nr = String(cq.data || '').match(/^nr:(\d+)$/);
+    if (me && nr) {
+      const from = meta.users[nr[1]];
+      if (from && from.started) await this.send(from.id, `❤️ ${escHtml(me.name || 'Семья')} — в ответ на твоё сообщение`);
+      await answer('Отправлено ❤️');
+      if (cq.message) await tg(this.env, 'editMessageReplyMarkup', { chat_id: cq.message.chat.id, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [[{ text: '❤️ отправлено', callback_data: 'nx' }]] } });
+      return;
+    }
+    if (cq.data === 'nx') return answer('Уже отправлено');
     const m = String(cq.data || '').match(/^hd:([pf]):([^:]+):(\d{8})$/);
     if (!me || !m) return answer('Не получилось');
     const key = m[1] === 'f' ? 'family' : 'u:' + me.id;
@@ -401,6 +440,16 @@ export class Store extends DurableObject {
       if (wh.ok) meta.hookv = HOOK_VER;
     }
     if (meta.cmdv !== CMD_VER && meta.appUrl) { const cm = await tg(this.env, 'setMyCommands', { commands: COMMANDS }); if (cm.ok) meta.cmdv = CMD_VER; }
+    if ((meta.notes || []).some(n => n.at <= now)) {
+      const due = meta.notes.filter(n => n.at <= now);
+      meta.notes = meta.notes.filter(n => n.at > now);
+      await this.putMeta(meta);
+      for (const n of due) {
+        const from = meta.users[n.from]; if (!from) continue;
+        const list = n.to === 'all' ? Object.values(meta.users).filter(u => u.id !== n.from) : [meta.users[n.to]].filter(Boolean);
+        for (const u of list) if (u.started) await this.sendNote(from, u, n.text);
+      }
+    }
     const users = Object.values(meta.users).filter(u => u.started);
     if (!users.length) return { users: 0 };
     const fam = await this.data('family');

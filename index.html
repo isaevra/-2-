@@ -350,6 +350,7 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .crow .ttl{font-weight:700;font-size:15px}
 .crow>svg{width:18px;height:18px;color:var(--dim);flex:none}
 .catbtn{margin-right:8px}
+[hidden]{display:none!important}
 .swatches{display:flex;flex-wrap:wrap;gap:8px}
 .swatches label{position:relative}
 .swatches input{position:absolute;opacity:0;pointer-events:none}
@@ -745,6 +746,7 @@ V.home = () => {
       <div class="val"><div>${pct}%<small>дня</small></div></div>
     </div>
   </section>
+  ${noteCard()}
 
   <div class="stats">
     <button class="stat" data-go="plan"><i class="si"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="m8 12 3 3 5-6"/></svg></i><span>Дела</span><b>${tt.filter(x => x.done).length}/${tt.length}</b></button>
@@ -1026,6 +1028,7 @@ const F = {
     ${me ? `<button class="btn sec" data-act="digestNow">Прислать сводку сейчас</button>
       <div style="height:1px;background:var(--line);margin:18px 0"></div>
       <div class="f"><span>Семья</span><div class="members">${SRV.members.map(m => `<span class="chip">${esc(m.name)}${m.id === me.id ? ' (ты)' : ''}</span>`).join('')}</div></div>
+      ${SRV.members.length > 1 ? '<button class="btn sec" data-act="noteNew">Отправить уведомление близким</button>' : ''}
       ${me.isOwner ? '<button class="btn sec" data-act="invite">Пригласить в семью</button>' : ''}
       <button class="btn sec" data-act="calOpen">Календари iPhone${SRV.cal && SRV.cal.connected ? ' · ' + SRV.cal.sources.length : ''}</button>` : ''}
     <div style="height:1px;background:var(--line);margin:18px 0"></div>
@@ -2071,6 +2074,58 @@ document.addEventListener('change', (e) => {
 document.addEventListener('input', (e) => { if (e.target.name === 'name' && e.target.closest('[data-form=cat]') && !e.target.form.dataset.iconTouched) {
   const f = e.target.form, k = guessIcon(e.target.value); const r = f.querySelector(`[name=icon][value="${k}"]`); if (r && k !== 'dots') { r.checked = true; $('#catPrev').innerHTML = cicon(k, f.querySelector('[name=color]:checked').value, 'big'); } } });
 document.addEventListener('click', (e) => { const r = e.target.closest && e.target.closest('[data-form=cat] .pick.icons'); if (r) r.closest('form').dataset.iconTouched = '1'; }, true);
+
+
+/* ============ Разовое уведомление члену семьи ============ */
+const others = () => MODE === 'server' ? SRV.members.filter(m => m.id !== SRV.me.id) : [];
+const noteCard = () => {
+  const o = others(); if (!o.length || SCOPE !== 'family') return '';
+  return `<section class="card" style="padding:6px 16px"><button class="crow" data-act="noteNew">${cicon('heart', '#f06bb3')}<span class="t"><span class="ttl">Написать близким</span><span class="sub">${o.length === 1 ? esc(o[0].name) + ' получит' : 'Придёт'} уведомление от бота — сейчас или в нужное время</span></span>${I.right}</button></section>`;
+};
+const NOTE_CHIPS = ['Люблю тебя ❤️', 'Скучаю по тебе', 'Ты у меня самая лучшая', 'Позвони, когда сможешь', 'Буду через 30 минут', 'Купи, пожалуйста, хлеб'];
+const fmtAt = (ms) => { const d = new Date(ms); return `${dayLabel(ymd(d))}, ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+F.note = (pre = {}) => {
+  const o = others(), notes = (SRV.notes || []).slice().sort((a, b) => a.at - b.at);
+  const who = [...o.map(m => [String(m.id), esc(m.name)]), ...(o.length > 1 ? [['all', 'Всем']] : [])];
+  const later = new Date(Date.now() + 3600000); later.setMinutes(0, 0, 0);
+  const lv = `${ymd(later)}T${pad(later.getHours())}:00`;
+  return `<h3>Уведомление</h3>
+  <form data-form="note">
+    <div class="f"><span>Кому</span>${radios('to', who, pre.to || who[0][0])}</div>
+    <label class="f"><span>Сообщение</span><textarea class="inp" name="text" rows="3" maxlength="1000" required placeholder="Например: люблю тебя ❤️">${esc(pre.text || '')}</textarea></label>
+    <div class="qchips" style="display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 14px">${NOTE_CHIPS.map(c => `<button type="button" class="chip" data-act="noteChip" data-t="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+    <div class="f"><span>Когда</span>${radios('when', [['now', 'Сейчас'], ['later', 'Запланировать']], 'now', 'seg')}</div>
+    <label class="f" id="noteAt" hidden><span>Дата и время</span><input class="inp" type="datetime-local" name="at" value="${lv}"></label>
+    <p class="hint">Придёт от бота с подписью «${esc(SRV.me.name)} передаёт». Под сообщением будет кнопка ❤️ — тебе придёт ответ.</p>
+    <button class="btn">Отправить</button>
+  </form>
+  ${notes.length ? `<div class="f" style="margin-top:14px"><span>Запланировано</span><div class="card" style="padding:4px 14px">${notes.map(n => {
+    const to = n.to === 'all' ? 'Всем' : (SRV.members.find(m => m.id === n.to) || {}).name || '';
+    return `<div class="crow">${cicon('heart', '#f06bb3', 'sm')}<span class="t"><span class="ttl" style="font-size:14px">${esc(n.text.length > 60 ? n.text.slice(0, 60) + '…' : n.text)}</span><span class="sub">${esc(to)} · ${fmtAt(n.at)}</span></span><button type="button" class="chip" data-act="noteDel" data-id="${n.id}">Отменить</button></div>`;
+  }).join('')}</div></div>` : ''}`;
+};
+Object.assign(A, {
+  noteNew: () => openSheet(F.note()),
+  noteChip: (d) => { const t = $('[data-form=note] [name=text]'); if (t) { t.value = d.t; t.focus(); } },
+  noteDel: async (d) => {
+    try { const r = await api('noteDel', { id: d.id }); if (r.ok) { SRV.notes = r.notes; openSheet(F.note()); toast('Отменено'); } } catch (e) { toast('Нет связи с сервером'); }
+  }
+});
+FORMS.note = async (fd, f) => {
+  const text = String(fd.get('text') || '').trim(); if (!text) return;
+  const later = fd.get('when') === 'later';
+  const at = later ? new Date(fd.get('at')).getTime() : 0;
+  if (later && !(at > Date.now() + 60000)) { toast('Выбери время в будущем'); return; }
+  const btn = f.querySelector('.btn'); btn.disabled = true;
+  try {
+    const r = await api('notify', { to: fd.get('to'), text, at });
+    if (r.notes) SRV.notes = r.notes;
+    if (r.scheduled) { hap('ok'); closeSheet(); toast('Запланировано на ' + fmtAt(at)); }
+    else if (r.ok) { hap('ok'); closeSheet(); toast(r.missed && r.missed.length ? `Отправлено. ${r.missed.join(', ')} ещё не открыл(а) бота` : 'Отправлено 💌'); }
+    else { btn.disabled = false; toast(r.missed && r.missed.length ? `${r.missed.join(', ')} ещё не нажал(а) Start в боте` : 'Не получилось отправить'); }
+  } catch (e) { btn.disabled = false; toast('Нет связи с сервером'); }
+};
+document.addEventListener('change', (e) => { if (e.target.name === 'when' && e.target.closest('[data-form=note]')) $('#noteAt').hidden = e.target.value !== 'later'; });
 
 /* ============ События ============ */
 document.addEventListener('click', (e) => {
