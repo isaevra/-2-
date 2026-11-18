@@ -659,6 +659,7 @@ const UI = { view: 'home', planMonth: null, selDay: today(), thTag: '', thQ: '',
 // Дни привычки: h.days — номера дней недели (0 = вс … 6 = сб); пусто — каждый день
 const habitOn = (h, k) => !h || !Array.isArray(h.days) || !h.days.length || h.days.includes(parseYmd(k).getDay());
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const NEWS_SECS = [['weather', 'Погода'], ['svo', 'СВО и политика'], ['sport', 'Спорт'], ['esport', 'Киберспорт'], ['auto', 'Авто'], ['city', 'Новости города']];
 const daysLabel = (h) => {
   const d = Array.isArray(h.days) ? h.days : [];
   if (!d.length || d.length === 7) return '';
@@ -1050,10 +1051,14 @@ const F = {
       <div class="f"><span>Валюта</span>${radios('currency', [['₽', '₽ рубль'], ['$', '$ доллар'], ['€', '€ евро'], ['¥', '¥ юань']], P.currency)}</div>
       ${me ? `<div class="f"><span>Утренняя сводка в Telegram</span><div class="two">
         <label class="sw"><input type="checkbox" name="digestOn" ${me.digestOn ? 'checked' : ''}>Присылать</label>
-        <input class="inp" type="time" name="digest" value="${me.digest || '08:00'}" aria-label="Время сводки"></div></div>` : ''}
+        <input class="inp" type="time" name="digest" value="${me.digest || '08:00'}" aria-label="Время сводки"></div></div>
+      <div class="f"><span>Что добавить в сводку</span><div class="pick">${NEWS_SECS.map(([k, l]) => `<label><input type="checkbox" name="news_${k}" ${me.news && me.news[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+        <p class="hint" style="margin:6px 0 0">Погода — в самой сводке, новости приходят следом отдельным сообщением без звука. Про СВО собираю из BBC, DW, «Медузы», «Коммерсанта» и ТАСС; выше — то, о чём пишут сразу несколько изданий.</p></div>
+      <label class="f"><span>Город для погоды и новостей</span><input class="inp" name="city" maxlength="60" value="${esc(me.city || 'Владивосток')}" autocomplete="off"></label>` : ''}
       <button class="btn">Сохранить</button>
     </form>
     ${me ? `<button class="btn sec" data-act="digestNow">Прислать сводку сейчас</button>
+      <div class="two"><button class="btn sec" style="margin:0" data-act="newsNow">Новости сейчас</button><button class="btn sec" style="margin:0" data-act="newsStatus">Источники</button></div>
       <div style="height:1px;background:var(--line);margin:18px 0"></div>
       <div class="f"><span>Семья</span><div class="members">${SRV.members.map(m => `<span class="chip">${esc(m.name)}${m.id === me.id ? ' (ты)' : ''}</span>`).join('')}</div></div>
       ${SRV.members.length > 1 ? '<button class="btn sec" data-act="noteNew">Отправить уведомление близким</button>' : ''}
@@ -1141,6 +1146,19 @@ const A = {
     if (!el.classList.contains('sure')) { el.classList.add('sure'); el.textContent = 'Нажми ещё раз, чтобы удалить всё'; return; }
     setScopeState(Object.assign(emptyS(), { name: S.name, currency: S.currency }));
     closeSheet(); commit(['replace', S]); toast(MODE === 'server' && SCOPE === 'family' ? 'Данные семьи удалены' : 'Все данные удалены');
+  },
+  newsNow: async (d, el) => {
+    el.disabled = true; const t = el.textContent; el.textContent = 'Собираю…';
+    try { const r = await api('news'); toast(r.ok ? 'Новости отправлены в чат с ботом' : r.error === 'not_started' ? 'Сначала нажми Start в чате с ботом' : 'Включи хотя бы один раздел новостей'); }
+    catch (e) { toast('Нет связи с сервером'); }
+    el.disabled = false; el.textContent = t;
+  },
+  newsStatus: async () => {
+    try {
+      const r = await api('newsStatus');
+      openSheet(`<h3>Источники новостей</h3><div class="card" style="padding:4px 14px">${r.feeds.map(f => `<div class="crow"><span class="t"><span class="ttl">${esc(f.name)}</span><span class="sub">${f.at ? (f.ok ? `работает · ${f.n} новостей · ${ago(f.at)}` : `<span style="color:var(--red)">не отвечает: ${esc(f.err)}</span> · ${ago(f.at)}`) : 'ещё не загружался'}</span></span></div>`).join('')}</div>
+        <p class="hint">Ленты обновляются раз в час. Если источник не отвечает, в сводке будут новости из остальных.</p><button class="btn sec" data-act="settings">Назад</button>`);
+    } catch (e) { toast('Нет связи с сервером'); }
   },
   digestNow: async () => {
     try {
@@ -1334,8 +1352,13 @@ const FORMS = {
     P.name = (fd.get('name') || '').trim() || P.name; P.currency = fd.get('currency') || P.currency;
     persist([['meta', { name: P.name, currency: P.currency }]], 'personal');
     if (MODE === 'server') {
-      try { const r = await api('profile', { digestOn: fd.get('digestOn') === 'on', digest: fd.get('digest') || '08:00' }); if (r.ok) SRV.me = r.me; }
-      catch (e) { toast('Время сводки не сохранилось: нет связи'); }
+      try {
+        const news = Object.fromEntries(NEWS_SECS.map(([k]) => [k, fd.get('news_' + k) === 'on']));
+        const r = await api('profile', { digestOn: fd.get('digestOn') === 'on', digest: fd.get('digest') || '08:00', news, city: String(fd.get('city') || '').trim() });
+        if (r.me) SRV.me = r.me;
+        if (r.error === 'city_not_found') { toast('Не нашёл такой город — проверь название'); const c = $('[data-form=settings] [name=city]'); if (c) { c.focus(); c.style.borderColor = 'var(--red)'; } return; }
+      }
+      catch (e) { toast('Настройки сводки не сохранились: нет связи'); }
     }
     closeSheet(); render(); toast('Настройки сохранены');
   },

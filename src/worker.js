@@ -6,7 +6,8 @@ import {
   dueReminders, buildDigest, digestDue, escHtml,
   ZEN_API, zenDiffToOps, firstOfPrevMonth, partsIn, splitShop, shopAddOps, SHOP_RE,
   parseIcs, expandIcs, shortHash, shiftYmd, dueHabitReminders,
-  weeklyReport, monthlyReport, reportsDue, limitAlerts
+  weeklyReport, monthlyReport, reportsDue, limitAlerts,
+  FEEDS, NEWS_SECS, DEF_CITY, cityFeed, newsPrefs, parseFeed, buildNews, weatherText, weatherUrl
 } from './lib.js';
 const HOOK_VER = 2; // вебхук принимает нажатия кнопок
 
@@ -15,13 +16,14 @@ const CAL_REMIND = ['', '0', '15', '30', '60', '180', '1440'];
 
 const COMMANDS = [
   { command: 'today', description: 'Сводка на сегодня' },
+  { command: 'news', description: 'Новости и погода' },
   { command: 'shop', description: 'Список покупок' },
   { command: 'week', description: 'Траты за неделю' },
   { command: 'month', description: 'Итоги месяца' },
   { command: 'invite', description: 'Пригласить в семью' },
   { command: 'help', description: 'Что умеет бот' }
 ];
-const CMD_VER = 3;
+const CMD_VER = 4;
 
 const ZEN_EVERY = 30 * 60e3; // как часто обновлять Дзен-мани
 
@@ -75,7 +77,7 @@ export class Store extends DurableObject {
     const me = meta.users[user.id];
     const members = () => Object.values(meta.users).map(u => ({ id: u.id, name: u.name, started: !!u.started }));
     const myNotes = () => (meta.notes || []).filter(n => n.from === me.id).map(n => ({ id: n.id, to: n.to, text: n.text, at: n.at }));
-    const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', repWeek: me.repWeek !== false, repMonth: me.repMonth !== false, isOwner: meta.owner === me.id, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
+    const pub = () => ({ id: me.id, name: me.name, theme: me.theme || '', repWeek: me.repWeek !== false, repMonth: me.repMonth !== false, isOwner: meta.owner === me.id, news: newsPrefs(me, meta.owner === me.id), city: (me.city || DEF_CITY).name, digest: me.digest, digestOn: me.digestOn !== false, tz: me.tz, started: !!me.started });
 
     if (action === 'load') {
       if (body.tz) me.tz = validTz(String(body.tz));
@@ -98,6 +100,12 @@ export class Store extends DurableObject {
       if (typeof body.repWeek === 'boolean') me.repWeek = body.repWeek;
       if (typeof body.repMonth === 'boolean') me.repMonth = body.repMonth;
       if (typeof body.name === 'string' && body.name.trim()) me.name = body.name.trim().slice(0, 40);
+      if (body.news && typeof body.news === 'object') me.news = Object.fromEntries(NEWS_SECS.map(([k]) => [k, !!body.news[k]]));
+      if (typeof body.city === 'string' && body.city.trim() && body.city.trim().toLowerCase() !== (me.city || DEF_CITY).name.toLowerCase()) {
+        const c = await this.geocode(body.city.trim().slice(0, 60));
+        if (!c) { await this.putMeta(meta); return { ok: false, error: 'city_not_found', me: pub() }; }
+        me.city = c;
+      }
       await this.putMeta(meta);
       return { ok: true, me: pub() };
     }
@@ -130,6 +138,16 @@ export class Store extends DurableObject {
       if (!me.started) return { ok: false, error: 'not_started' };
       const r = await this.sendDigest(meta, me, Date.now());
       return { ok: !!(r && r.ok), error: r && r.ok ? undefined : 'send_failed' };
+    }
+    if (action === 'news') {
+      if (!me.started) return { ok: false, error: 'not_started' };
+      const r = await this.sendNews(meta, me, Date.now(), true);
+      return { ok: !!(r && r.ok), error: r ? undefined : 'empty' };
+    }
+    if (action === 'newsStatus') {
+      const list = [...FEEDS, cityFeed(me.city || DEF_CITY)];
+      const recs = await this.feedRecs(list.map(f => f.id));
+      return { ok: true, feeds: list.map(f => { const r = recs[f.id] || {}; return { name: f.name || 'Новости: ' + (me.city || DEF_CITY).name, sec: f.sec, ok: !!r.ok, n: r.n || 0, at: r.at || 0, err: r.err || '' }; }) };
     }
     if (action === 'report') {
       if (!me.started) return { ok: false, error: 'not_started' };
@@ -343,6 +361,10 @@ export class Store extends DurableObject {
     if (!me) return this.send(from.id, 'Это личный бот семьи. Попроси владельца прислать ссылку-приглашение.');
     if (!me.started) { me.started = true; await this.putMeta(meta); }
 
+    if (text === '/news' || /^новости$/i.test(text)) {
+      const r = await this.sendNews(meta, me, Date.now(), true);
+      return r || this.send(from.id, 'Все разделы новостей выключены. Включить их можно в мини-аппе: ⚙️ → Утренняя сводка.');
+    }
     if (text === '/today') {
       const r = await this.sendDigest(meta, me, Date.now(), true);
       return r;
@@ -427,8 +449,61 @@ export class Store extends DurableObject {
   async sendDigest(meta, me, now, manual = false) {
     const pers = await this.data('u:' + me.id);
     const fam = await this.data('family');
-    const text = buildDigest({ name: pers.name || me.name, pers, fam, tz: me.tz || DEF_TZ, now, hasFamily: Object.keys(meta.users).length > 1, uid: me.id });
-    return this.send(me.id, text, { reply_markup: this.openBtn(meta), disable_notification: false });
+    const pr = newsPrefs(me, meta.owner === me.id), city = me.city || DEF_CITY;
+    const weather = pr.weather ? weatherText(await this.weather(city), city) : '';
+    const text = buildDigest({ name: pers.name || me.name, pers, fam, tz: me.tz || DEF_TZ, now, hasFamily: Object.keys(meta.users).length > 1, uid: me.id, weather });
+    const r = await this.send(me.id, text, { reply_markup: this.openBtn(meta), disable_notification: false });
+    await this.sendNews(meta, me, now, false, manual ? 12 : 4);
+    return r;
+  }
+
+  /* ---------- Новости и погода ---------- */
+  async sendNews(meta, me, now, manual, max) {
+    const pr = newsPrefs(me, meta.owner === me.id), city = me.city || DEF_CITY;
+    const secs = ['svo', 'sport', 'esport', 'auto', 'city'].filter(k => pr[k]);
+    if (!secs.length && !(manual && pr.weather)) return null;
+    const need = [...FEEDS.filter(f => secs.includes(f.sec)), ...(pr.city ? [cityFeed(city)] : [])];
+    await this.refreshFeeds(need, now, max || (manual ? 12 : 4));
+    const recs = await this.feedRecs(need.map(f => f.id));
+    let text = buildNews(pr, recs, now, city);
+    if (manual && pr.weather) { const w = weatherText(await this.weather(city), city); if (w) text = w + (text ? '\n\n' + text : ''); }
+    if (!text) return manual ? this.send(me.id, 'Свежих новостей по выбранным разделам пока нет — источники не ответили. Попробуй позже.') : null;
+    return this.send(me.id, text, { disable_notification: true });
+  }
+  async feedRecs(ids) {
+    const out = {};
+    for (const id of ids) out[id] = await this.ctx.storage.get('feed:' + id) || null;
+    return out;
+  }
+  // Обновляет устаревшие (старше 55 мин) ленты, не больше max за раз
+  async refreshFeeds(list, now, max) {
+    const recs = await this.feedRecs(list.map(f => f.id));
+    const stale = list.filter(f => !recs[f.id] || now - recs[f.id].at > 55 * 60000).sort((a, b) => ((recs[a.id] || {}).at || 0) - ((recs[b.id] || {}).at || 0)).slice(0, max);
+    await Promise.all(stale.map(async f => {
+      const rec = { at: now, ok: false, n: 0, err: '', items: (recs[f.id] || {}).items || [] };
+      try {
+        const r = await fetch(f.url, { headers: { 'user-agent': 'Mozilla/5.0 (compatible; MyDayBot/1.0)', accept: 'application/rss+xml, application/xml, text/xml, */*' }, signal: AbortSignal.timeout(9000), cf: { cacheTtl: 600 } });
+        if (!r.ok) rec.err = 'HTTP ' + r.status;
+        else { const items = parseFeed(await r.text()); rec.n = items.length; if (items.length) { rec.ok = true; rec.items = items.slice(0, 40); } else rec.err = 'пустая лента'; }
+      } catch (e) { rec.err = String(e && e.name === 'TimeoutError' ? 'нет ответа' : e).slice(0, 80); }
+      await this.ctx.storage.put('feed:' + f.id, rec);
+    }));
+  }
+  async weather(city) {
+    const key = `wx:${city.lat.toFixed(2)},${city.lon.toFixed(2)}`, c = await this.ctx.storage.get(key);
+    if (c && Date.now() - c.at < 30 * 60000) return c.w;
+    try {
+      const r = await fetch(weatherUrl(city), { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return c && c.w;
+      const w = await r.json(); await this.ctx.storage.put(key, { at: Date.now(), w }); return w;
+    } catch (e) { return c && c.w; }
+  }
+  async geocode(name) {
+    try {
+      const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=ru&format=json`, { signal: AbortSignal.timeout(8000) });
+      const j = await r.json(), g = j && j.results && j.results[0];
+      return g ? { name: g.name, lat: +g.latitude, lon: +g.longitude } : null;
+    } catch (e) { return null; }
   }
 
   /* ---------- Каждую минуту ---------- */
@@ -452,6 +527,16 @@ export class Store extends DurableObject {
     }
     const users = Object.values(meta.users).filter(u => u.started);
     if (!users.length) return { users: 0 };
+    {
+      const need = new Map();
+      for (const u of users) {
+        const pr = newsPrefs(u, meta.owner === u.id);
+        if (u.digestOn === false) continue;
+        for (const f of FEEDS) if (pr[f.sec]) need.set(f.id, f);
+        if (pr.city) { const cf = cityFeed(u.city || DEF_CITY); need.set(cf.id, cf); }
+      }
+      if (need.size) await this.refreshFeeds([...need.values()], now, 3);
+    }
     const fam = await this.data('family');
     const hasFamily = Object.keys(meta.users).length > 1;
     let sent = 0, zenDone = false, calDone = false; // за один тик — не больше одной синхронизации

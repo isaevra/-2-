@@ -161,11 +161,12 @@ const streak = (h, ymd) => {
   }
   return n;
 };
-export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid }) {
+export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid, weather }) {
   const { ymd, hm } = partsIn(tz, new Date(now));
   const h = Number(hm.slice(0, 2));
   const greet = h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер';
   const L = [`<b>${greet}${name ? ', ' + escHtml(name) : ''}!</b>`, dayTitle(ymd)[0].toUpperCase() + dayTitle(ymd).slice(1)];
+  if (weather) L.push('', weather);
   const srcs = [['', pers]].concat(hasFamily && fam ? [['👨‍👩‍👧 ', fam]] : []);
 
   const ev = [];
@@ -555,3 +556,140 @@ export function limitAlerts(st, mk, sentMap, cur) {
   }
   return out;
 }
+
+/* ---------- Утренние новости и погода ---------- */
+// Политика/СВО — издания с разными позициями: BBC и DW (зарубежные общественные), «Медуза» (независимое),
+// «Коммерсантъ» (российское деловое), ТАСС (государственное). Выше идут события, о которых пишут сразу несколько.
+export const FEEDS = [
+  { id: 'bbc', name: 'BBC', sec: 'svo', url: 'https://feeds.bbci.co.uk/russian/rss.xml' },
+  { id: 'dw', name: 'DW', sec: 'svo', url: 'https://rss.dw.com/rdf/rss-ru-top' },
+  { id: 'meduza', name: 'Медуза', sec: 'svo', url: 'https://meduza.io/rss/all' },
+  { id: 'kommersant', name: 'Коммерсантъ', sec: 'svo', url: 'https://www.kommersant.ru/RSS/news.xml' },
+  { id: 'tass', name: 'ТАСС', sec: 'svo', url: 'https://tass.ru/rss/v2.xml' },
+  { id: 'sports', name: 'Sports.ru', sec: 'sport', url: 'https://www.sports.ru/rss/topnews.xml' },
+  { id: 'cyber', name: 'Cyber.Sports.ru', sec: 'esport', url: 'https://cyber.sports.ru/rss/topnews.xml' },
+  { id: 'zr', name: 'За рулём', sec: 'auto', url: 'https://www.zr.ru/rss-yandex/' }
+];
+export const NEWS_SECS = [
+  ['weather', 'Погода'], ['svo', 'СВО и политика'], ['sport', 'Спорт'], ['esport', 'Киберспорт'], ['auto', 'Авто'], ['city', 'Новости города']
+];
+export const DEF_CITY = { name: 'Владивосток', lat: 43.1155, lon: 131.8855 };
+export const cityFeed = (city) => ({ id: 'city:' + (city.name || '').toLowerCase(), name: '', sec: 'city',
+  url: 'https://news.google.com/rss/search?q=' + encodeURIComponent((city.name || DEF_CITY.name) + ' when:1d') + '&hl=ru&gl=RU&ceid=RU:ru' });
+export const newsPrefs = (u, isOwner) => {
+  const all = Object.fromEntries(NEWS_SECS.map(([k]) => [k, true]));
+  const def = isOwner ? all : { weather: true, svo: false, sport: false, esport: false, auto: false, city: true };
+  return { ...def, ...(u && u.news || {}) };
+};
+
+const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', laquo: '«', raquo: '»', mdash: '—', ndash: '–', hellip: '…' };
+const decode = (s) => String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
+  .replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1)) : (ENT[e.toLowerCase()] ?? m))
+  .replace(/\s+/g, ' ').trim();
+const tagVal = (blk, names) => {
+  for (const n of names) {
+    const m = blk.match(new RegExp(`<${n}(?:\\s[^>]*)?>([\\s\\S]*?)</${n}>`, 'i'));
+    if (m && decode(m[1])) return decode(m[1]);
+  }
+  return '';
+};
+// RSS 2.0 / RDF / Atom → [{t, l, d, s}]
+export function parseFeed(xml) {
+  const out = [];
+  const blocks = String(xml || '').match(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi) || [];
+  for (const b of blocks.slice(0, 60)) {
+    let t = tagVal(b, ['title']);
+    let l = tagVal(b, ['link', 'guid']);
+    if (!/^https?:/.test(l)) { const m = b.match(/<link[^>]*href="([^"]+)"/i); l = m ? m[1].replace(/&amp;/g, '&') : ''; }
+    const ds = tagVal(b, ['pubDate', 'published', 'updated', 'dc:date']);
+    const d = Date.parse(ds) || 0;
+    let s = tagVal(b, ['source']);
+    if (!t || !/^https?:/.test(l)) continue;
+    if (s && t.endsWith(' - ' + s)) t = t.slice(0, -(s.length + 3));
+    out.push({ t: t.slice(0, 220), l: l.slice(0, 600), d, ...(s ? { s: s.slice(0, 60) } : {}) });
+  }
+  return out;
+}
+const SVO_RE = /украин|\bсво\b|спецоперац|\bвсу\b|фронт|зеленск|киев|донецк|днр|лнр|луганск|курск|белгород|запорож|херсон|харьков|покровск|перемири|мирн\S* (переговор|план|соглаш|сделк)|переговор\S* (по|о) украин|беспилотн|\bбпла\b|дрон|обстрел|ракетн\S* удар|минобороны|пленн|мобилизац|уиткофф|стамбул|санкци/i;
+const STOP = new Set('этого этот которые который также после более будет может могут заявил заявила сообщил сообщили россии россия российский российские года году время против глава'.split(' '));
+const stems = (t) => new Set((t.toLowerCase().match(/[a-zа-яё0-9]{4,}/g) || []).filter(w => !STOP.has(w)).map(w => w.slice(0, 5)));
+const similar = (a, b) => { let n = 0; for (const x of a) if (b.has(x)) n++; return n >= 3 || n / Math.max(1, Math.min(a.size, b.size)) >= 0.5 && n >= 2; };
+// Собирает раздел: свежие (за 26 ч), без повторов; для СВО — группирует одно событие из разных изданий
+export function pickSection(sec, feedItems, now, limit) {
+  const fresh = [];
+  for (const [src, items] of feedItems) for (const it of items || []) {
+    if (it.d && now - it.d > 26 * 3600000) continue;
+    if (sec === 'svo' && !SVO_RE.test(it.t)) continue;
+    fresh.push({ ...it, src: it.s || src, st: stems(it.t) });
+  }
+  fresh.sort((a, b) => b.d - a.d);
+  const groups = [];
+  for (const it of fresh) {
+    const g = groups.find(g => g.items.some(x => similar(x.st, it.st)));
+    if (g) g.items.push(it); else groups.push({ items: [it] });
+  }
+  for (const g of groups) { g.srcs = [...new Set(g.items.map(x => x.src))]; g.d = Math.max(...g.items.map(x => x.d)); }
+  if (sec === 'svo') groups.sort((a, b) => b.srcs.length - a.srcs.length || b.d - a.d);
+  const used = {}, out = [];
+  for (const g of groups.slice(0, limit)) {
+    // заголовок берём у издания, которое пока реже всего попадало в подборку — так позиции уравновешены
+    const it = [...g.items].sort((a, b) => (used[a.src] || 0) - (used[b.src] || 0) || b.d - a.d)[0];
+    used[it.src] = (used[it.src] || 0) + 1;
+    out.push({ t: it.t, l: it.l, src: it.src, srcs: g.srcs });
+  }
+  if (sec === 'svo') {
+    // одиночные новости — по кругу от разных изданий, чтобы ни одно не занимало всю подборку
+    const multi = out.filter(x => x.srcs.length > 1), single = out.filter(x => x.srcs.length === 1);
+    const by = {}; for (const x of single) (by[x.src] = by[x.src] || []).push(x);
+    const rr = []; let more = true;
+    for (let i = 0; more; i++) { more = false; for (const k of Object.keys(by)) if (by[k][i]) { rr.push(by[k][i]); more = true; } }
+    return multi.concat(rr).slice(0, limit);
+  }
+  return out;
+}
+const SEC_HEAD = { svo: '⚔️ <b>СВО и политика</b>', sport: '🏆 <b>Спорт</b>', esport: '🎮 <b>Киберспорт</b>', auto: '🚗 <b>Авто</b>', city: '🏙 <b>' };
+const SEC_LIMIT = { svo: 7, sport: 4, esport: 4, auto: 4, city: 5 };
+export function buildNews(prefs, feeds, now, city = DEF_CITY) {
+  const L = ['📰 <b>Новости за сутки</b>'];
+  let any = false;
+  for (const sec of ['svo', 'city', 'sport', 'esport', 'auto']) {
+    if (!prefs[sec]) continue;
+    const list = sec === 'city'
+      ? [[cityFeed(city).id, (feeds[cityFeed(city).id] || {}).items]]
+      : FEEDS.filter(f => f.sec === sec).map(f => [f.name, (feeds[f.id] || {}).items]);
+    const items = pickSection(sec, list, now, SEC_LIMIT[sec]);
+    if (!items.length) continue;
+    any = true;
+    L.push('', sec === 'city' ? `${SEC_HEAD.city}${escHtml(city.name)}</b>` : SEC_HEAD[sec]);
+    for (const it of items) {
+      const src = sec === 'svo' ? (it.srcs.length > 1 ? `${it.srcs.slice(0, 4).join(', ')}` : it.src) : (sec === 'city' ? it.src : '');
+      L.push(`• <a href="${escHtml(it.l)}">${escHtml(it.t)}</a>${src && !/^city:/.test(src) ? ` <i>— ${escHtml(src)}</i>` : ''}`);
+    }
+    if (sec === 'svo') L.push('<i>Сверху — события, о которых пишут сразу несколько изданий с разными позициями.</i>');
+  }
+  if (!any) return '';
+  // лимит Telegram — 4096 символов видимого текста
+  let text = L.join('\n');
+  while (text.replace(/<[^>]+>/g, '').length > 3900 && L.length > 3) { L.splice(L.findLastIndex(x => x.startsWith('• ')), 1); text = L.join('\n'); }
+  return text;
+}
+const WMO = [[[0], '☀️', 'ясно'], [[1], '🌤', 'малооблачно'], [[2], '⛅', 'переменная облачность'], [[3], '☁️', 'пасмурно'], [[45, 48], '🌫', 'туман'],
+  [[51, 53, 55], '🌦', 'морось'], [[56, 57], '🌧', 'ледяная морось'], [[61, 63], '🌧', 'дождь'], [[65], '🌧', 'сильный дождь'], [[66, 67], '🌧', 'ледяной дождь'],
+  [[71, 73], '🌨', 'снег'], [[75], '❄️', 'сильный снег'], [[77], '🌨', 'снежная крупа'], [[80, 81], '🌦', 'ливень'], [[82], '⛈', 'сильный ливень'],
+  [[85, 86], '🌨', 'снегопад'], [[95], '⛈', 'гроза'], [[96, 99], '⛈', 'гроза с градом']];
+const wmo = (c) => WMO.find(([cs]) => cs.includes(Number(c))) || [[], '🌡', ''];
+const deg = (v) => { const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r) + '°'; };
+// Ответ Open-Meteo → строка для сводки
+export function weatherText(w, city = DEF_CITY) {
+  const d = w && w.daily, c = w && w.current;
+  if (!d || !d.temperature_2m_max) return '';
+  const [, ic, txt] = wmo(d.weather_code ? d.weather_code[0] : c && c.weather_code);
+  const L = [`${ic} <b>${escHtml(city.name)}</b>: ${deg(d.temperature_2m_min[0])}…${deg(d.temperature_2m_max[0])}${txt ? ', ' + txt : ''}`];
+  const extra = [];
+  if (c && c.temperature_2m != null) extra.push(`сейчас ${deg(c.temperature_2m)}${c.apparent_temperature != null && Math.abs(c.apparent_temperature - c.temperature_2m) >= 2 ? ` (ощущается ${deg(c.apparent_temperature)})` : ''}`);
+  if (d.wind_speed_10m_max) extra.push(`ветер до ${Math.round(d.wind_speed_10m_max[0])} м/с`);
+  if (d.precipitation_probability_max && d.precipitation_probability_max[0] >= 30) extra.push(`осадки ${d.precipitation_probability_max[0]}%`);
+  if (extra.length) L.push(extra.join(', '));
+  return L.join('\n');
+}
+export const weatherUrl = (city) => `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&timezone=auto&forecast_days=1&wind_speed_unit=ms`;
