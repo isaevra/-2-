@@ -194,10 +194,16 @@ export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid }) {
 
   const mk = ymd.slice(0, 7);
   let inc = 0, out = 0;
-  for (const o of pers.money || []) if (o.date && o.date.startsWith(mk)) { if (o.type === 'in') inc += +o.amount || 0; else out += +o.amount || 0; }
-  if (inc || out) {
-    const cur = pers.currency || '₽';
-    L.push('', `💰 <b>${MON[Number(mk.slice(5)) - 1]}</b>: доходы +${money(inc, cur)}, расходы −${money(out, cur)}`, `Остаток: ${inc - out < 0 ? '−' : ''}${money(Math.abs(inc - out), cur)}`);
+  let pig = 0;
+  for (const o of pers.money || []) if (o.date && o.date.startsWith(mk)) {
+    if (isPiggy(pers.cats, o.type, o.cat)) pig += (o.type === 'in' ? -1 : 1) * (+o.amount || 0);
+    else if (o.type === 'in') inc += +o.amount || 0; else out += +o.amount || 0;
+  }
+  if (inc || out || pig) {
+    const cur = pers.currency || '₽', rest = inc - out - pig;
+    L.push('', `💰 <b>${MON[Number(mk.slice(5)) - 1]}</b>: доходы +${money(inc, cur)}, расходы −${money(out, cur)}`, `Остаток: ${rest < 0 ? '−' : ''}${money(Math.abs(rest), cur)}`);
+    const tot = piggyTotal(pers);
+    if (tot) L.push(`🐷 В копилке: ${money(tot, cur)}`);
   }
 
   const shop = ((fam && fam.shop) || []).filter(x => !x.done);
@@ -435,23 +441,32 @@ export function dueHabitReminders(st, tz, now, scope, uid, windowMin = 15) {
 /* ---------- Финансы: категории, лимиты, отчёты ---------- */
 // Категория операции: по имени или по старому имени (после переименования)
 export const catOf = (cats, type, name) => (cats || []).find(c => c.type === type && (c.name === name || (c.alias || []).includes(name))) || null;
+// Копилка: категория с флагом piggy или со словом «копилка» в названии
+export const isPiggy = (cats, type, name) => { const c = catOf(cats, type, name); return c ? !!c.piggy || /копилк/i.test(c.name) : /копилк/i.test(name || ''); };
+export function piggyTotal(st, upTo) {
+  let t = 0;
+  for (const o of st.money || []) if ((!upTo || (o.date && o.date <= upTo)) && isPiggy(st.cats, o.type, o.cat)) t += (o.type === 'in' ? -1 : 1) * (Number(o.amount) || 0);
+  return t;
+}
+const piggyGoal = (st) => { const c = (st.cats || []).find(x => x.type === 'out' && (x.piggy || /копилк/i.test(x.name))); return c ? Number(c.goal) || 0 : 0; };
 const catTitle = (cats, type, name) => { const c = catOf(cats, type, name); return c ? c.name : (name || 'Без категории'); };
 const rub = (n, cur) => Math.round(n).toLocaleString('ru-RU').replace(/[\u00a0\u202f]/g, ' ') + ' ' + (cur || '₽');
 const MON_P = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
 const MON_N = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 export function spendSummary(st, from, to) {
   const cats = st.cats || [], by = {}, big = [];
-  let inc = 0, out = 0;
+  let inc = 0, out = 0, pigIn = 0, pigOut = 0;
   for (const o of st.money || []) {
     if (!o.date || o.date < from || o.date > to) continue;
     const a = Number(o.amount) || 0;
+    if (isPiggy(cats, o.type, o.cat)) { if (o.type === 'in') pigOut += a; else pigIn += a; continue; }
     if (o.type === 'in') { inc += a; continue; }
     out += a;
     const n = catTitle(cats, 'out', o.cat);
     by[n] = (by[n] || 0) + a;
     big.push({ ...o, catName: n, a });
   }
-  return { inc, out, by: Object.entries(by).sort((x, y) => y[1] - x[1]), big: big.sort((x, y) => y.a - x.a).slice(0, 3) };
+  return { inc, out, pigIn, pigOut, by: Object.entries(by).sort((x, y) => y[1] - x[1]), big: big.sort((x, y) => y.a - x.a).slice(0, 3) };
 }
 // Расход по категориям с лимитом за месяц mk
 export function limitStatus(st, mk) {
@@ -472,14 +487,19 @@ function limitLines(st, mk, cur) {
     return `• ${escHtml(l.name)} — ${rub(l.spent, cur)} из ${rub(l.limit, cur)}${left >= 0 ? `, осталось ${rub(left, cur)}` : ` 🔴 перерасход ${rub(-left, cur)}`}`;
   });
 }
+function pigLine(st, a, upTo, cur, period) {
+  const net = a.pigIn - a.pigOut, tot = piggyTotal(st, upTo), goal = piggyGoal(st);
+  return `🐷 Копилка: ${net >= 0 ? '+' : '−'}${rub(Math.abs(net), cur)} ${period}, всего <b>${rub(tot, cur)}</b>${goal ? ` из ${rub(goal, cur)} (${Math.round(tot / goal * 100)}%)` : ''}`;
+}
 export function weeklyReport(st, today, cur) {
   const from = shiftYmd(today, -6), pFrom = shiftYmd(today, -13), pTo = shiftYmd(today, -7);
   const a = spendSummary(st, from, today), p = spendSummary(st, pFrom, pTo);
   const L = [`📊 <b>Траты за неделю</b> · ${rangeLabel(from, today)}`];
-  if (!a.out && !a.inc) return L.concat('', 'За эту неделю операций не было.').join('\n');
+  if (!a.out && !a.inc && !a.pigIn && !a.pigOut) return L.concat('', 'За эту неделю операций не было.').join('\n');
   const d = pctDiff(a.out, p.out);
   L.push('', `Потрачено: <b>${rub(a.out, cur)}</b>${d === null ? '' : d === 0 ? ' (как неделей раньше)' : ` (${d > 0 ? 'на ' + d + '% больше' : 'на ' + -d + '% меньше'}, чем неделей раньше)`}`);
   if (a.inc) L.push(`Доходы: +${rub(a.inc, cur)}`);
+  if (a.pigIn || a.pigOut) L.push(pigLine(st, a, today, cur, 'за неделю'));
   if (a.by.length) { L.push('', '<b>Основные траты</b>'); a.by.slice(0, 5).forEach(([n, v]) => L.push(`• ${escHtml(n)} — ${rub(v, cur)} (${Math.round(v / a.out * 100)}%)`)); }
   if (a.big.length) { L.push('', '<b>Крупные покупки</b>'); a.big.forEach(o => L.push(`• ${rub(o.a, cur)} — ${escHtml(o.catName)}${o.note ? ', ' + escHtml(o.note) : ''}`)); }
   const lim = limitLines(st, today.slice(0, 7), cur);
@@ -491,9 +511,10 @@ export function monthlyReport(st, mk, cur) {
   const pm = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
   const a = spendSummary(st, mk + '-01', mk + '-31'), p = spendSummary(st, pm + '-01', pm + '-31');
   const L = [`🗓 <b>Итоги месяца: ${MON_N[m - 1]}</b>`];
-  if (!a.out && !a.inc) return L.concat('', `В ${MON_P[m - 1]} операций не было.`).join('\n');
-  const bal = a.inc - a.out, d = pctDiff(a.out, p.out);
+  if (!a.out && !a.inc && !a.pigIn && !a.pigOut) return L.concat('', `В ${MON_P[m - 1]} операций не было.`).join('\n');
+  const bal = a.inc - a.out - (a.pigIn - a.pigOut), d = pctDiff(a.out, p.out);
   L.push('', `Доходы: +${rub(a.inc, cur)}`, `Расходы: −${rub(a.out, cur)}${d === null ? '' : ` (${d >= 0 ? '+' : '−'}${Math.abs(d)}% к прошлому месяцу)`}`, `Остаток: <b>${bal < 0 ? '−' : ''}${rub(Math.abs(bal), cur)}</b>`);
+  if (a.pigIn || a.pigOut || piggyTotal(st, mk + '-31')) L.push(pigLine(st, a, mk + '-31', cur, 'за месяц'));
   if (a.by.length) {
     const prev = Object.fromEntries(p.by);
     L.push('', '<b>По категориям</b>');
