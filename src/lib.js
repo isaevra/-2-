@@ -151,9 +151,14 @@ export function dueReminders(st, tz, now, scope, windowMin = 15) {
 }
 
 /* ---------- Утренняя сводка ---------- */
+// Дни привычки: h.days — номера дней недели (0 = вс … 6 = сб); пусто — каждый день
+export const habitOn = (h, ymd) => !h || !Array.isArray(h.days) || !h.days.length || h.days.includes(new Date(ymd + 'T00:00:00Z').getUTCDay());
 const streak = (h, ymd) => {
   let n = 0, d = h.done && h.done[ymd] ? ymd : shiftYmd(ymd, -1);
-  while (h.done && h.done[d]) { n++; d = shiftYmd(d, -1); }
+  for (let i = 0; i < 400; i++) {
+    if (h.done && h.done[d]) n++; else if (habitOn(h, d)) break;
+    d = shiftYmd(d, -1);
+  }
   return n;
 };
 export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid }) {
@@ -186,10 +191,10 @@ export function buildDigest({ name, pers, fam, tz, now, hasFamily, uid }) {
   const habits = pers.habits || [];
   if (habits.length) {
     const y = shiftYmd(ymd, -1);
-    const done = habits.filter(x => x.done && x.done[y]).length;
-    L.push('', `🔥 <b>Привычки</b>: вчера ${done} из ${habits.length}`);
+    const plan = habits.filter(x => habitOn(x, y)), done = plan.filter(x => x.done && x.done[y]).length;
+    if (plan.length) L.push('', `🔥 <b>Привычки</b>: вчера ${done} из ${plan.length}`); else L.push('', '🔥 <b>Привычки</b>');
     const st = habits.map(x => [x, streak(x, y)]).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    if (st.length) L.push(st.map(([x, n]) => `${x.emoji || ''} ${escHtml(x.title)} — ${n} ${plural(n, 'день', 'дня', 'дней')}`).join('\n'));
+    if (st.length) L.push(st.map(([x, n]) => `${x.emoji || ''} ${escHtml(x.title)} — ${n} ${Array.isArray(x.days) && x.days.length ? plural(n, 'раз', 'раза', 'раз') + ' подряд' : plural(n, 'день', 'дня', 'дней')}`).join('\n'));
   }
 
   const mk = ymd.slice(0, 7);
@@ -427,6 +432,7 @@ export function dueHabitReminders(st, tz, now, scope, uid, windowMin = 15) {
     const to = h.remindTo == null ? '' : String(h.remindTo);
     if (scope === 'p' ? !to : !(to === 'all' || to === String(uid))) continue;
     if (h.done && h.done[today]) continue;
+    if (!habitOn(h, today)) continue;
     const at = zonedToMs(today, h.time, tz);
     const cb = `hd:${scope}:${h.id}:${today.replace(/-/g, '')}`;
     const body = `${h.emoji || '⏰'} <b>${escHtml(h.title)}</b> — ${h.time}${h.note ? '\n' + escHtml(h.note) : ''}`;

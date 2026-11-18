@@ -351,6 +351,8 @@ textarea.inp{height:auto;min-height:90px;padding:12px 14px;resize:vertical}
 .crow>svg{width:18px;height:18px;color:var(--dim);flex:none}
 .catbtn{margin-right:8px}
 [hidden]{display:none!important}
+.pick.days{display:flex;gap:6px}.pick.days label{flex:1}.pick.days span{width:100%;justify-content:center;padding:0;text-transform:capitalize}
+.hd.off{opacity:.35}
 .cic.xs{width:20px;height:20px;border-radius:6px;background:none}.cic.xs svg{width:16px;height:16px}
 .io .pg{display:inline-flex;align-items:center;gap:3px;color:#f06bb3}
 .sum.pig{color:#f06bb3}
@@ -654,10 +656,20 @@ let S = null;
 const UI = { view: 'home', planMonth: null, selDay: today(), thTag: '', thQ: '', mMonth: today().slice(0, 7), ptab: 'today', showDone: '' };
 
 /* ============ Вычисления ============ */
+// Дни привычки: h.days — номера дней недели (0 = вс … 6 = сб); пусто — каждый день
+const habitOn = (h, k) => !h || !Array.isArray(h.days) || !h.days.length || h.days.includes(parseYmd(k).getDay());
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const daysLabel = (h) => {
+  const d = Array.isArray(h.days) ? h.days : [];
+  if (!d.length || d.length === 7) return '';
+  const key = DAY_ORDER.filter(x => d.includes(x)).join('');
+  if (key === '12345') return 'по будням'; if (key === '60') return 'по выходным';
+  return DAY_ORDER.filter(x => d.includes(x)).map(x => WD_S[x]).join(', ');
+};
 const streak = (h) => {
   let n = 0, d = new Date();
   if (!h.done[ymd(d)]) d = addDays(d, -1);
-  while (h.done[ymd(d)]) { n++; d = addDays(d, -1); }
+  for (let i = 0; i < 400; i++) { const k = ymd(d); if (h.done[k]) n++; else if (habitOn(h, k)) break; d = addDays(d, -1); }
   return n;
 };
 const byTime = (a, b) => (a.time || '99').localeCompare(b.time || '99');
@@ -702,10 +714,11 @@ function remindToOpts(h) {
 // Привычки со временем на сегодня: свои + семейные, назначенные мне
 function timedHabitsToday() {
   const out = [];
-  for (const h of S.habits || []) if (h.time) out.push({ h, sc: SCOPE });
+  const t = today();
+  for (const h of S.habits || []) if (h.time && habitOn(h, t)) out.push({ h, sc: SCOPE });
   if (MODE === 'server' && SCOPE === 'personal') {
     const me = String(SRV.me.id);
-    for (const h of SRV.family.habits || []) if (h.time && (String(h.remindTo) === me || h.remindTo === 'all')) out.push({ h, sc: 'family' });
+    for (const h of SRV.family.habits || []) if (h.time && habitOn(h, t) && (String(h.remindTo) === me || h.remindTo === 'all')) out.push({ h, sc: 'family' });
   }
   return out;
 }
@@ -722,9 +735,10 @@ V.home = () => {
   const tt = S.tasks.filter(x => x.date === t);
   const overdue = S.tasks.filter(x => !x.done && x.date && x.date < t);
   const ev = S.events.filter(e => e.date === t).sort(byTime);
-  const hd = S.habits.filter(h => h.done[t]).length;
+  const todayHab = S.habits.filter(h => habitOn(h, t));
+  const hd = todayHab.filter(h => h.done[t]).length;
   const famMine = timedHabitsToday().filter(x => x.sc === 'family' && x.sc !== SCOPE).map(x => x.h);
-  const total = tt.length + S.habits.length + famMine.length;
+  const total = tt.length + todayHab.length + famMine.length;
   const doneAll = tt.filter(x => x.done).length + hd + famMine.filter(h => h.done && h.done[t]).length;
   const pct = total ? Math.round(doneAll / total * 100) : 0;
   const ms = monthSum(t.slice(0, 7));
@@ -733,7 +747,7 @@ V.home = () => {
   const C = 2 * Math.PI * 40;
   const lastTh = [...S.thoughts].sort((a, b) => b.ts - a.ts).slice(0, 2);
   const open = [...tt].sort((a, b) => a.done - b.done || byTime(a, b) || PR(a) - PR(b));
-  const openT = tt.filter(x => !x.done).length + overdue.length, habTotal = S.habits.length + famMine.length;
+  const openT = tt.filter(x => !x.done).length + overdue.length, habTotal = todayHab.length + famMine.length;
   return `
   <section class="hero">
     <svg class="mtn" viewBox="0 0 400 120" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
@@ -873,18 +887,19 @@ function thList() {
 V.habits = () => {
   const days = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i - 6));
   const t = today();
-  const done = S.habits.filter(h => h.done[t]).length;
+  const plan = S.habits.filter(h => habitOn(h, t)), done = plan.filter(h => h.done[t]).length;
   return `
   <div class="vhead"><h1>Привычки</h1><span class="sp"></span><button class="addbtn" data-act="newHabit">${I.plus}Привычка</button></div>
   ${S.habits.length ? `
-    <p class="mut" style="margin:-6px 0 14px;font-weight:600">Сегодня ${done} из ${S.habits.length}. Можно отметить и прошедшие дни.</p>
+    <p class="mut" style="margin:-6px 0 14px;font-weight:600">${plan.length ? `Сегодня ${done} из ${plan.length}` : 'Сегодня по плану ничего'}. Можно отметить и прошедшие дни.</p>
     ${S.habits.map(h => {
       const s = streak(h);
-      const last30 = Array.from({ length: 30 }, (_, i) => ymd(addDays(new Date(), -i))).filter(k => h.done[k]).length;
+      const m30 = Array.from({ length: 30 }, (_, i) => ymd(addDays(new Date(), -i))), sch = m30.filter(k => habitOn(h, k)).length || 1;
+      const last30 = Math.min(sch, m30.filter(k => h.done[k]).length), dl = daysLabel(h);
       return `<div class="habit">
         <button class="hn" data-act="editHabit" data-id="${h.id}"><span class="em">${h.emoji}</span>
-          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div>${h.time || h.note ? `<div class="st" style="color:var(--tx);opacity:.75">${h.time ? '⏰ ' + h.time + (h.note ? ' · ' : '') : ''}${esc(h.note || '')}</div>` : ''}<div class="st">${s ? `<b>${s} ${plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / 30 * 100)}% за месяц</div></span></button>
-        <div class="hdots">${days.map(d => { const k = ymd(d); return `<div class="hd ${k === t ? 'today' : ''}"><button class="dot ${h.done[k] ? 'on' : ''} ${k === t ? 'today' : ''}" data-act="habit" data-id="${h.id}" data-day="${k}" aria-label="${esc(h.title)}, ${d.getDate()} ${MON_G[d.getMonth()]}" aria-pressed="${!!h.done[k]}"></button>${k === t ? 'сегодня' : WD_S[d.getDay()] + ' ' + d.getDate()}</div>`; }).join('')}</div>
+          <span style="min-width:0;flex:1"><div class="nm">${esc(h.title)}</div>${h.time || h.note || dl ? `<div class="st" style="color:var(--tx);opacity:.75">${[dl, h.time ? '⏰ ' + h.time : '', esc(h.note || '')].filter(Boolean).join(' · ')}</div>` : ''}<div class="st">${s ? `<b>${s} ${dl ? plural(s, 'раз', 'раза', 'раз') : plural(s, 'день', 'дня', 'дней')} подряд</b>` : 'серия не начата'}, ${Math.round(last30 / sch * 100)}% за месяц</div></span></button>
+        <div class="hdots">${days.map(d => { const k = ymd(d); return `<div class="hd ${k === t ? 'today' : ''} ${habitOn(h, k) ? '' : 'off'}"><button class="dot ${h.done[k] ? 'on' : ''} ${k === t ? 'today' : ''}" data-act="habit" data-id="${h.id}" data-day="${k}" aria-label="${esc(h.title)}, ${d.getDate()} ${MON_G[d.getMonth()]}" aria-pressed="${!!h.done[k]}"></button>${k === t ? 'сегодня' : WD_S[d.getDay()] + ' ' + d.getDate()}</div>`; }).join('')}</div>
       </div>`;
     }).join('')}`
   : `<div class="card empty" style="text-align:center;padding:28px 16px">Начни с одной маленькой привычки, которую точно сможешь делать каждый день.<br><br><button data-act="newHabit">Добавить привычку</button></div>`}`;
@@ -1003,8 +1018,11 @@ const F = {
         <label class="f"><span>Время (если нужно)</span><input class="inp" type="time" name="time" value="${h.time || ''}"></label>
         ${MODE === 'server' ? `<label class="f"><span>Напоминать</span><select class="inp" name="remindTo">${remindToOpts(h)}</select></label>` : ''}
       </div>
-      <label class="f"><span>Что входит</span><input class="inp" name="note" maxlength="200" value="${esc(h.note || '')}" placeholder="Например: инозитол, D3, омега-3 — с завтраком"></label>
-      <p class="hint">Привычка со временем появится в «Сегодня» на главной, а бот пришлёт напоминание с кнопкой «Готово». Если не отметить, через час напомнит ещё раз.</p>
+      <div class="f"><span>Дни</span><div class="pick days">${DAY_ORDER.map(d => `<label><input type="checkbox" name="days" value="${d}" ${Array.isArray(h.days) && h.days.includes(d) ? 'checked' : ''}><span>${WD_S[d]}</span></label>`).join('')}</div>
+        <div class="row" style="gap:6px;margin-top:8px"><button type="button" class="chip" data-act="hdays" data-v="">Каждый день</button><button type="button" class="chip" data-act="hdays" data-v="12345">Будни</button><button type="button" class="chip" data-act="hdays" data-v="60">Выходные</button></div>
+        <p class="hint" style="margin:6px 0 0" id="daysHint">${daysLabel(h) ? 'Напоминания только ' + (/^по /.test(daysLabel(h)) ? daysLabel(h) : 'в эти дни: ' + daysLabel(h)) : 'Ничего не выбрано — каждый день'}</p></div>
+      <label class="f"><span>Что входит</span><input class="inp" name="note" maxlength="200" value="${esc(h.note || '')}" placeholder="Например: селен, мака, омега-3 — с завтраком"></label>
+      <p class="hint">Привычка со временем появится в «Сегодня» на главной в выбранные дни, а бот пришлёт напоминание с кнопкой «Готово». Если не отметить, через час напомнит ещё раз. В остальные дни напоминаний не будет.</p>
       <button class="btn">Сохранить</button>${delBtn('delHabit', h.id)}
     </form>`,
   op: (o = {}) => {
@@ -1289,7 +1307,8 @@ const FORMS = {
     closeSheet(); hap('ok'); commit(['put', 'events', it]); toast(id ? 'Событие сохранено' : 'Событие добавлено');
   },
   habit: (fd) => {
-    const o = { title: fd.get('title').trim(), emoji: fd.get('emoji') || '🎯', time: fd.get('time') || '', note: (fd.get('note') || '').trim() }; if (fd.has('remindTo')) o.remindTo = fd.get('remindTo');
+    const days = [...new Set(fd.getAll('days').map(Number).filter(x => x >= 0 && x <= 6))];
+    const o = { title: fd.get('title').trim(), emoji: fd.get('emoji') || '🎯', time: fd.get('time') || '', note: (fd.get('note') || '').trim(), days: days.length === 7 ? [] : days }; if (fd.has('remindTo')) o.remindTo = fd.get('remindTo');
     const id = fd.get('id');
     let it; if (id) it = Object.assign(find('habits', id), o); else S.habits.push(it = byMe({ id: uid(), done: {}, ...o }));
     closeSheet(); hap('ok'); commit(['put', 'habits', it]); toast(id ? 'Привычка сохранена' : 'Привычка добавлена');
@@ -2109,6 +2128,15 @@ document.addEventListener('input', (e) => { if (e.target.name === 'name' && e.ta
   const f = e.target.form, k = guessIcon(e.target.value); const r = f.querySelector(`[name=icon][value="${k}"]`); if (r && k !== 'dots') { r.checked = true; $('#catPrev').innerHTML = cicon(k, f.querySelector('[name=color]:checked').value, 'big'); } } });
 document.addEventListener('click', (e) => { const r = e.target.closest && e.target.closest('[data-form=cat] .pick.icons'); if (r) r.closest('form').dataset.iconTouched = '1'; }, true);
 
+
+/* ============ Дни привычки ============ */
+const updDaysHint = () => {
+  const f = $('[data-form=habit]'); if (!f) return;
+  const d = [...f.querySelectorAll('[name=days]:checked')].map(x => +x.value), l = daysLabel({ days: d });
+  $('#daysHint').textContent = l ? 'Напоминания только ' + (/^по /.test(l) ? l : 'в эти дни: ' + l) : 'Ничего не выбрано — каждый день';
+};
+A.hdays = (d) => { const f = $('[data-form=habit]'); f.querySelectorAll('[name=days]').forEach(x => { x.checked = d.v.includes(x.value); }); updDaysHint(); };
+document.addEventListener('change', (e) => { if (e.target.name === 'days') updDaysHint(); });
 
 /* ============ Разовое уведомление члену семьи ============ */
 const others = () => MODE === 'server' ? SRV.members.filter(m => m.id !== SRV.me.id) : [];
